@@ -1,0 +1,4 @@
+nameko
+nameko-redis
+marshmallow
+redis

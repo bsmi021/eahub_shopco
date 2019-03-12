@@ -1,0 +1,5 @@
+nameko
+marshmallow
+alembic
+nameko-sqlalchemy
+psycopg2

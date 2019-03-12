@@ -1,0 +1,129 @@
+version: "2"
+services:
+
+#  nifi:
+#    image: apache/nifi
+#    hostname: nifi
+#    ports:
+#      - "18080:8080"
+
+#  mongo:
+#    image: mongo
+#    hostname: mongo
+#    ports:
+#      - "27017:27017"
+
+  redis:
+    image: redis:4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    hostname: redis
+    ports:
+      - 6379:6379
+    volumes:
+      - redis-data:/data
+
+  postgres_orders:
+    image: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: orders
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_USER: "postgres"
+      restart: always
+
+
+  postgres_products:
+    image: postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: "products"
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_USER: "postgres"
+      restart: always
+
+
+  rabbit:
+    image: rabbitmq:3.6-management
+    ports:
+      - "15672:15672"
+
+  products:
+    build:
+      context: products
+    depends_on:
+      - postgres_products
+      - rabbit
+    environment:
+      RABBIT_PASSWORD: "guest"
+      RABBIT_USER: "guest"
+      RABBIT_HOST: "rabbit"
+      RABBIT_PORT: "5672"
+      DB_PASSWORD: "password"
+      DB_USER: "postgres"
+      DB_HOST: "postgres_products"
+      DB_NAME: "products"
+      PYTHONPATH: "."
+      MONGO_HOST: "mongo"
+      MONGO_PORT: "27017"
+
+  orders:
+    build:
+      context: orders
+    depends_on:
+      - postgres_orders
+      - rabbit
+    environment:
+      RABBIT_PASSWORD: "guest"
+      RABBIT_USER: "guest"
+      RABBIT_HOST: "rabbit"
+      RABBIT_PORT: "5672"
+      DB_PASSWORD: "password"
+      DB_USER: "postgres"
+      DB_HOST: "postgres_orders"
+      DB_NAME: "orders"
+      PYTHONPATH: "."
+
+  basket:
+    build:
+      context: basket
+    depends_on:
+      - rabbit
+    environment:
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      RABBIT_PASSWORD: "guest"
+      RABBIT_USER: "guest"
+      RABBIT_HOST: "rabbit"
+      RABBIT_PORT: "5672"
+
+  payment:
+    build:
+      context: payment
+    depends_on:
+      - rabbit
+    environment:
+      RABBIT_PASSWORD: "guest"
+      RABBIT_USER: "guest"
+      RABBIT_HOST: "rabbit"
+      RABBIT_PORT: "5672"
+
+  gateway:
+    build:
+      context: gateway
+    depends_on:
+      - rabbit
+    ports:
+      - "5000:5000"
+      - "8000:8000"
+    environment:
+      RABBIT_PASSWORD: "guest"
+      RABBIT_USER: "guest"
+      RABBIT_HOST: "rabbit"
+      RABBIT_PORT: "5672"
+      PYTHONPATH: "."
+
+
+volumes:
+  redis-data:
