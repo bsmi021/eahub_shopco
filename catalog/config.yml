@@ -1,0 +1,5 @@
+AMQP_URI: amqp://${RABBIT_USER}:${RABBIT_PASSWORD}@${RABBIT_HOST}:${RABBIT_PORT}/
+
+DB_URIS:
+  "command_brands:Base": postgresql://${DB_USER:postgres}:${DB_PASSWORD:password}@${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:catalog}
+  "command_products:Base": postgresql://${DB_USER:postgres}:${DB_PASSWORD:password}@${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:catalog}

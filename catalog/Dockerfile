@@ -8,10 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY config.yml ./
 COPY run.sh ./
-COPY orders ./orders/
-
-COPY alembic.ini ./
-COPY alembic/. ./alembic/
+COPY catalog ./catalog/
 
 RUN chmod +x ./run.sh
 

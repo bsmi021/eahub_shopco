@@ -1,0 +1,60 @@
+version: '2.1'
+
+services:
+  #redis:
+  #  container_name: redis
+  #  image: redis
+  #  ports:
+  #    - "6379:6379"
+  #  healthcheck:
+  #    test: exit 0
+  #  restart: always
+
+  rabbitmq:
+    image: rabbitmq
+    build: queue
+    ports:
+      - "15672:15672"
+      - "5672:5672"
+    restart: always
+
+  querydb_catalog:
+    build: catalog/query_db/
+    ports:
+      - "27018:27017"
+    restart: always
+
+  commanddb_catalog:
+    build: catalog/command_db/
+    ports:
+      - "5435:5432"
+    healthcheck:
+      test: exit 0
+    restart: always
+
+  catalog_service:
+    build:
+      context:
+        catalog
+    environment:
+      - RABBIT_PASSWORD=guest
+      - RABBIT_USER=guest
+      - RABBIT_HOST=rabbitmq
+      - RABBIT_PORT=5672
+      - DB_PASSWORD=password
+      - DB_USER=postgres
+      - DB_HOST=commanddb_catalog
+      - DB_NAME=catalog
+      - PYTHONPATH=.
+      - MONGO_HOST=querydb_catalog
+      - MONGO_PORT=27017
+      - MONGO_DATABASE=catalog
+    depends_on:
+      - querydb_catalog
+      - commanddb_catalog
+      - rabbitmq
+    links:
+      - querydb_catalog
+      - commanddb_catalog
+      - rabbitmq
+    restart: always

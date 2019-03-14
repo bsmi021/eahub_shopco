@@ -1,0 +1,6 @@
+nameko
+marshmallow
+nameko-sqlalchemy
+psycopg2-binary
+PyYAML==3.13
+mongoengine
