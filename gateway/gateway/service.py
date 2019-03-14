@@ -18,6 +18,7 @@ class GatewayService:
     products_rpc = RpcProxy('products_service')
     orders_rpc = RpcProxy('orders_service')
     basket_rpc = RpcProxy('basket_service')
+    customers_rpc = RpcProxy('customers_service')
 
     @http('GET', '/brands')
     def list_brand(self, request):

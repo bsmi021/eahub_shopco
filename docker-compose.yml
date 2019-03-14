@@ -1,4 +1,4 @@
-version: "2"
+version: "2.1"
 services:
 
 #  nifi:
@@ -7,11 +7,7 @@ services:
 #    ports:
 #      - "18080:8080"
 
-#  mongo:
-#    image: mongo
-#    hostname: mongo
-#    ports:
-#      - "27017:27017"
+
 
   redis:
     image: redis:4-alpine
@@ -21,9 +17,20 @@ services:
       - 6379:6379
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: exit 0
 
-  postgres_orders:
+  customers_db:
+    image: mongo
+    hostname: customers_db
+    ports:
+      - 27017:27017
+    environment:
+      MONGO_INITDB_DATABASE: customers
+
+  orders_db:
     image: postgres
+    hostname: orders_db
     ports:
       - "5432:5432"
     environment:
@@ -33,27 +40,58 @@ services:
       restart: always
 
 
-  postgres_products:
+  products_db:
     image: postgres
     ports:
       - "5433:5432"
+    hostname: products_db
     environment:
       POSTGRES_DB: "products"
       POSTGRES_PASSWORD: "password"
       POSTGRES_USER: "postgres"
       restart: always
 
+  users_db:
+    build: ./users/db
+    ports:
+      - 5435:5432
+    environment:
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_USER: "postgres"
+      restart: always
+    healthcheck:
+      test: exit 0
 
   rabbit:
     image: rabbitmq:3.6-management
     ports:
       - "15672:15672"
 
+  users_service:
+    image: users_service
+    build: ./users
+    environment:
+      - APP_RD_ADDRESS=redis:6379
+      - APP_RD_AUTH=password
+      - APP_RD_DBNAME=5
+      - APP_SETTINGS=project.config.DevelopmentConfig
+      - DATABASE_URL=postgres://postgres:password@users_db:5432/users_prod?sslmode=disable
+      - DATABASE_DEV_URL=postgres://postgres:password@users_db:5432/users_dev?sslmode=disable
+      - DATABASE_TEST_URL=postgres://postgres:password@users_db:5432/users_test?sslmode=disable
+    depends_on:
+      users_db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    links:
+      - users_db
+      - redis
+
   products:
     build:
       context: products
     depends_on:
-      - postgres_products
+      - products_db
       - rabbit
     environment:
       RABBIT_PASSWORD: "guest"
@@ -62,7 +100,7 @@ services:
       RABBIT_PORT: "5672"
       DB_PASSWORD: "password"
       DB_USER: "postgres"
-      DB_HOST: "postgres_products"
+      DB_HOST: "products_db"
       DB_NAME: "products"
       PYTHONPATH: "."
       MONGO_HOST: "mongo"
@@ -72,7 +110,7 @@ services:
     build:
       context: orders
     depends_on:
-      - postgres_orders
+      - orders_db
       - rabbit
     environment:
       RABBIT_PASSWORD: "guest"
@@ -81,7 +119,7 @@ services:
       RABBIT_PORT: "5672"
       DB_PASSWORD: "password"
       DB_USER: "postgres"
-      DB_HOST: "postgres_orders"
+      DB_HOST: "orders_db"
       DB_NAME: "orders"
       PYTHONPATH: "."
 
@@ -109,13 +147,28 @@ services:
       RABBIT_HOST: "rabbit"
       RABBIT_PORT: "5672"
 
+  customers:
+    build:
+      context: customers
+    depends_on:
+      - redis
+      - customers_db
+    environment:
+      RABBIT_PASSWORD: "guest"
+      RABBIT_USER: "guest"
+      RABBIT_HOST: "rabbit"
+      RABBIT_PORT: "5672"
+      MONGO_HOST: "customers_db"
+      MONGO_PORT: "27017"
+      MONGO_DATABASE: "customers"
+      PYTHONPATH: "."
+
   gateway:
     build:
       context: gateway
     depends_on:
       - rabbit
     ports:
-      - "5000:5000"
       - "8000:8000"
     environment:
       RABBIT_PASSWORD: "guest"
@@ -124,6 +177,31 @@ services:
       RABBIT_PORT: "5672"
       PYTHONPATH: "."
 
+  orchestrator:
+    build:
+      context: orchestrator
+    environment:
+      APP_SETTINGS: "orchestrator.config.ProductionConfig"
+      RABBIT_PASSWORD: "guest"
+      RABBIT_USER: "guest"
+      RABBIT_HOST: "rabbit"
+      RABBIT_PORT: "5672"
+      PYTHONPATH: "."
+    ports:
+      - "5000:5000"
+    depends_on:
+      - rabbit
+      - customers
+
+  proxy:
+    container_name: loadbalancer
+    build: ./nginx
+    ports:
+      - "8080:80"
+    depends_on:
+      - orchestrator
+      - users_service
+      - gateway
 
 volumes:
   redis-data:

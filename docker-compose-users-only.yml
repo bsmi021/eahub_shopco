@@ -1,0 +1,48 @@
+version: '2.1'
+services:
+  users-redis:
+    container_name: users-redis
+    image: redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: exit 0
+
+  users-service-db:
+    container_name: users-service-db
+    build: ./users/db
+    ports:
+      - 5435:5432 # expose ports - HOST:CONTAINER
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    healthcheck:
+      test: exit 0
+
+  users_service:
+    image: users_service
+    build: ./users
+    environment:
+      - APP_RD_ADDRESS=users-redis:6379
+      - APP_RD_AUTH=password
+      - APP_RD_DBNAME=0
+      - APP_SETTINGS=project.config.DevelopmentConfig
+      - DATABASE_URL=postgres://postgres:postgres@users-service-db:5432/users_prod?sslmode=disable
+      - DATABASE_DEV_URL=postgres://postgres:postgres@users-service-db:5432/users_dev?sslmode=disable
+      - DATABASE_TEST_URL=postgres://postgres:postgres@users-service-db:5432/users_test?sslmode=disable
+    depends_on:
+      users-service-db:
+        condition: service_healthy
+      users-redis:
+        condition: service_healthy
+    links:
+      - users-service-db
+      - users-redis
+
+  users-proxy:
+    container_name: userservice_loadbalance
+    build: ./nginx
+    ports:
+      - "8080:80"
+    links:
+      - users_service

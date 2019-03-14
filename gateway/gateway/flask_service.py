@@ -1,7 +1,7 @@
 from flask import Flask
 from nameko.standalone.rpc import ServiceRpcProxy
 import os
-from gateway.schemas import ProductSchema, ProductBrandSchema, CreateProductBrandSchema
+from .schemas import ProductSchema, ProductBrandSchema, CreateProductBrandSchema
 import json
 from werkzeug.wrappers import Response
 
@@ -9,15 +9,15 @@ app = Flask(__name__)
 
 
 def rpc_proxy(service):
-    rabbit_user = os.getenv('RABBIT_USER').strip()
-    rabbit_password = os.getenv('RABBIT_PASSWORD').strip()
-    rabbit_host = os.getenv('RABBIT_HOST').strip()
-    rabbit_port = os.getenv('RABBIT_PORT').strip()
+    RABBIT_USER = os.getenv('RABBIT_USER', 'guest')
+    RABBIT_PASSWORD = os.getenv('RABBIT_PASSWORD', 'guest')
+    RABBIT_HOST = os.getenv('RABBIT_HOST', '127.0.0.1')
+    RABBIT_PORT = os.getenv('RABBIT_PORT', '5672')
 
-    config = {'AMQP_URI': 'amqp://{}:{}@{}:{}/'.format(rabbit_user,
-                                                       rabbit_password,
-                                                       rabbit_host,
-                                                       rabbit_port)}
+    config = {'AMQP_URI': 'amqp://{}:{}@{}:{}/'.format(RABBIT_USER,
+                                                       RABBIT_PASSWORD,
+                                                       RABBIT_HOST,
+                                                       RABBIT_PORT)}
     return ServiceRpcProxy(service, config)
 
 
