@@ -1,7 +1,4 @@
 AMQP_URI: amqp://${RABBIT_USER}:${RABBIT_PASSWORD}@${RABBIT_HOST}:${RABBIT_PORT}/
-REDIS_URIS:
-  development: redis://${REDIS_HOST}:${REDIS_PORT}/2
 
-
-MONGODB_CONNECTION_URL: mongodb://${MONGO_HOST}:${MONGO_PORT}
-MONGODB_DB_NAME: ${MONGO_DATABASE}
+DB_URIS:
+  "command_customers:Base": postgresql://${DB_USER:postgres}:${DB_PASSWORD:password}@${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:customers}

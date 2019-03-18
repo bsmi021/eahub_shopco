@@ -1,11 +1,11 @@
 version: "2.1"
 services:
 
-#  nifi:
-#    image: apache/nifi
-#    hostname: nifi
-#    ports:
-#      - "18080:8080"
+  #  nifi:
+  #    image: apache/nifi
+  #    hostname: nifi
+  #    ports:
+  #      - "18080:8080"
 
   redis:
     image: redis:4-alpine
@@ -18,13 +18,19 @@ services:
     healthcheck:
       test: exit 0
 
-  customers_db:
-    image: mongo
-    hostname: customers_db
+  querydb_customers:
+    build: customers/query_db/
     ports:
-      - 27017:27017
-    environment:
-      MONGO_INITDB_DATABASE: customers
+      - "27019:27017"
+    restart: always
+
+  commanddb_customers:
+    build: customers/command_db/
+    ports:
+      - "5439:5432"
+    healthcheck:
+      test: exit 0
+    restart: always
 
   orders_db:
     image: postgres
@@ -33,18 +39,6 @@ services:
       - "5432:5432"
     environment:
       POSTGRES_DB: orders
-      POSTGRES_PASSWORD: "password"
-      POSTGRES_USER: "postgres"
-      restart: always
-
-
-  products_db:
-    image: postgres
-    ports:
-      - "5433:5432"
-    hostname: products_db
-    environment:
-      POSTGRES_DB: "products"
       POSTGRES_PASSWORD: "password"
       POSTGRES_USER: "postgres"
       restart: always
@@ -88,25 +82,6 @@ services:
       - users_db
       - redis
 
-  products:
-    build:
-      context: products
-    depends_on:
-      - products_db
-      - rabbit
-    environment:
-      RABBIT_PASSWORD: "guest"
-      RABBIT_USER: "guest"
-      RABBIT_HOST: "rabbit"
-      RABBIT_PORT: "5672"
-      DB_PASSWORD: "password"
-      DB_USER: "postgres"
-      DB_HOST: "products_db"
-      DB_NAME: "products"
-      PYTHONPATH: "."
-      MONGO_HOST: "mongo"
-      MONGO_PORT: "27017"
-
   orders:
     build:
       context: orders
@@ -148,21 +123,32 @@ services:
       RABBIT_HOST: "rabbit"
       RABBIT_PORT: "5672"
 
-  customers:
+  customers_service:
     build:
-      context: customers
-    depends_on:
-      - redis
-      - customers_db
+      context:
+        customers
     environment:
-      RABBIT_PASSWORD: "guest"
-      RABBIT_USER: "guest"
-      RABBIT_HOST: "rabbit"
-      RABBIT_PORT: "5672"
-      MONGO_HOST: "customers_db"
-      MONGO_PORT: "27017"
-      MONGO_DATABASE: "customers"
-      PYTHONPATH: "."
+      - RABBIT_PASSWORD=guest
+      - RABBIT_USER=guest
+      - RABBIT_HOST=rabbit
+      - RABBIT_PORT=5672
+      - DB_PASSWORD=password
+      - DB_USER=postgres
+      - DB_HOST=commanddb_customers
+      - DB_NAME=customers
+      - PYTHONPATH=.
+      - MONGO_HOST=querydb_customers
+      - MONGO_PORT=27017
+      - MONGO_DATABASE=customers
+    depends_on:
+      - querydb_customers
+      - commanddb_customers
+      - rabbit
+    links:
+      - querydb_customers
+      - commanddb_customers
+      - rabbit
+    restart: always
 
   querydb_catalog:
     build: catalog/query_db/
@@ -234,17 +220,18 @@ services:
       - "5000:5000"
     depends_on:
       - rabbit
-      - customers
+      - customers_service
+      - catalog_service
 
   proxy:
-    container_name: loadbalancer
-    build: ./nginx
+    build:
+      context: nginx
     ports:
       - "8080:80"
     depends_on:
       - orchestrator
       - users_service
-      - gateway
+
 
 volumes:
   redis-data:

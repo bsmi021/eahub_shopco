@@ -1,8 +1,7 @@
 import datetime
 import os
 from mongoengine import *
-from sqlalchemy.dialects import postgresql
-
+#from sqlalchemy.dialects import postgresql
 
 from sqlalchemy import (
     DECIMAL, Column, DateTime, ForeignKey, Integer, String, Boolean
@@ -40,7 +39,7 @@ class Product(DeclarativeBase):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
     description = Column(String)
-    price = Column(DECIMAL(10,2))
+    price = Column(DECIMAL(10, 2))
     product_brand_id = Column(
         Integer,
         ForeignKey("product_brands.id", name='fk_product_product_brand'),
@@ -51,7 +50,11 @@ class Product(DeclarativeBase):
     restock_threshold = Column(Integer, nullable=False, default=0)
     max_stock_threshold = Column(Integer, nullable=False, default=1000)
     on_reorder = Column(Boolean, nullable=False, default=False)
-
+    weight = Column(DECIMAL, nullable=False, default=0)
+    width = Column(DECIMAL, nullable=False, default=0)
+    height = Column(DECIMAL, nullable=False, default=0)
+    depth = Column(DECIMAL, nullable=False, default=0)
+    sku = Column(String, nullable=False, default=0)
 
     def remove_stock(self, quantity_desired):
         """ decreements the quantity of an item from inventory"""
@@ -87,6 +90,7 @@ class Product(DeclarativeBase):
 
         return self.available_stock - original
 
+
 connect(os.getenv('MONGO_DATABASE', 'products'),
         host=os.environ.get('MONGO_HOST', '127.0.0.1'),
         port=int(os.environ.get('MONGO_PORT', 27017)))
@@ -95,6 +99,15 @@ connect(os.getenv('MONGO_DATABASE', 'products'),
 class QueryBrandModel(Document):
     id = IntField(primary_key=True)
     name = StringField()
+    created_at = StringField()
+    updated_at = StringField()
+
+
+class ShippingDetailsModel(EmbeddedDocument):
+    weight = FloatField()
+    width = FloatField()
+    height = FloatField()
+    depth = FloatField()
 
 
 class QueryProductsModel(Document):
@@ -106,3 +119,8 @@ class QueryProductsModel(Document):
     restock_threshold = IntField()
     on_reorder = BooleanField()
     max_stock_threshold = IntField()
+    created_at = StringField()
+    updated_at = StringField()
+    product_brand_id = IntField()
+    sku = StringField()
+    shipping_details = EmbeddedDocumentField(ShippingDetailsModel)

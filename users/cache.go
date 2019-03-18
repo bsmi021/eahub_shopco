@@ -7,10 +7,12 @@ import (
 	redigo "github.com/garyburd/redigo/redis"
 )
 
+// Pool is the interface to pool of redis
 type Pool interface {
 	Get() redigo.Conn
 }
 
+// Cache is the struc with cache configuration
 type Cache struct {
 	Enable          bool
 	MaxIdle         int
@@ -45,6 +47,7 @@ func (cache *Cache) NewCachePool() *redigo.Pool {
 				return err
 			},
 		}
+
 		c := pool.Get() // Test connection during init
 		if _, err := c.Do("PING"); err != nil {
 			log.Fatal("Cannot connect to Redis: ", err)

@@ -7,10 +7,14 @@ from nameko.timer import timer
 from nameko_sqlalchemy import DatabaseSession
 
 from .exceptions import NotFound
-from .models import DeclarativeBase, ProductBrand, Product, QueryProductsModel, QueryBrandModel
+from .models import *
 from .schemas import *
 
 import mongoengine
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class CommandBrands:
@@ -19,11 +23,14 @@ class CommandBrands:
     db = DatabaseSession(DeclarativeBase)
 
     def fire_replicate_db_event(self, data):
+        """ fires off a replication event,
+        this expose the event-sourcing pattern which will send the
+        record to the query database from the command database """
         self.dispatch('replicate_db_event', data)
 
     @rpc
     def add(self, brand):
-        name = brand['name']
+        name = brand.get('name')
 
         item = ProductBrand()
         item.name = name
@@ -38,15 +45,13 @@ class CommandBrands:
         return data
 
     @rpc
-    def update_brand(self, payload):
-        u_product_brand = self.db.query(ProductBrand).get(payload['id'])
+    def update(self, id, payload):
+        u_product_brand = self.db.query(ProductBrand).get(id)
 
         if u_product_brand is None:
             raise NotFound()
 
-        brand = payload['brand']
-
-        u_product_brand.name = brand['name']
+        u_product_brand.name = payload.get('name')
         u_product_brand.updated_at = datetime.datetime.utcnow()
 
         self.db.commit()
@@ -58,10 +63,56 @@ class CommandBrands:
         return data
 
     @rpc
-    def delete_brand(self, id):
+    def delete(self, id):
         product_brand = self.db.query(ProductBrand).get(id)
         self.db.delete(product_brand)
         self.db.commit()
+
+
+class QueryBrands:
+    name = 'query_brands'  # this is the service name
+
+    @event_handler('command_brands', 'replicate_db_event')
+    def normalize_db(self, data):
+        try:
+            brand = QueryBrandModel.objects.get(
+                id=data['id']
+            )
+            brand.update(
+                name=data.get('name', brand.name),
+                updated_at=data.get('updated_at', brand.updated_at)
+            )
+            brand.reload()
+        except mongoengine.DoesNotExist:
+            QueryBrandModel(
+                id=data['id'],
+                name=data['name'],
+                created_at=data['created_at'],
+                updated_at=data['updated_at']
+            ).save()
+        except Exception as e:
+            return e
+
+    @rpc
+    def get(self, id):
+        try:
+            brand = QueryBrandModel.objects.get(id=id)
+            return brand.to_json()
+        except mongoengine.DoesNotExist as e:
+            return e
+        except Exception as e:
+            return e
+
+    @rpc
+    def list(self, num_page, limit):
+        try:
+            if not num_page:
+                num_page = 1
+            offset = (num_page - 1) * limit
+            brands = QueryBrandModel.objects  # .skip(offset).limit(limit)
+            return brands.to_json()
+        except Exception as e:
+            return e
 
 
 class CommandProducts:
@@ -73,31 +124,44 @@ class CommandProducts:
         self.dispatch('replicate_db_event', data)
 
     @rpc
-    def add(self, product):
-        brand = self.db.query(ProductBrand) \
-            .get(product['product_brand_id'])
+    def add(self, data):
 
-        if brand is None:
-            raise NotFound()
+        try:
+            brand = self.db.query(ProductBrand) \
+                .get(data['product_brand_id'])
 
-        i_product = Product()
+            if brand is None:
+                raise NotFound()
 
-        i_product.product_brand = brand
-        i_product.name = product['name']
-        i_product.description = product['description']
-        i_product.price = product['price']
-        i_product.available_stock = product['available_stock']
-        i_product.restock_threshold = product['restock_threshold']
-        i_product.max_stock_threshold = product['max_stock_threshold']
+            product = Product()
 
-        self.db.add(i_product)
-        self.db.commit()
+            product.sku = data['sku']
+            product.product_brand = brand
+            product.name = data['name']
+            product.description = data['description']
+            product.price = data['price']
+            product.available_stock = data['available_stock']
+            product.restock_threshold = data['restock_threshold']
+            product.max_stock_threshold = data['max_stock_threshold']
+            product.on_reorder = data.get('on_reorder', False)
+            product.weight = data.get('weight', 0)
+            product.width = data.get('width', 0)
+            product.height = data.get('height', 0)
+            product.depth = data.get('depth', 0)
 
-        data = ProductSchema().dump(i_product).data
+            self.db.add(product)
+            self.db.commit()
 
-        self.fire_replicate_db_event(data)
+            data['id'] = product.id
+            data['created_at'] = product.created_at
+            data['updated_at'] = product.updated_at
 
-        return data
+            self.fire_replicate_db_event(data)
+
+            return data
+        except Exception as e:
+            self.db.rollback()
+            return e
 
     @rpc
     def update_product(self, payload):
@@ -159,7 +223,7 @@ class CommandProducts:
     def handle_order_status_awaiting_validation(self, payload):
         schema = OrderStatusChangedToAwaitingValidationEvent()
 
-        payload: OrderStatusChangedToPaidEvent = schema.loads(payload).data
+        payload = schema.loads(payload).data
 
         confirmed_order_stock_items = []
 
@@ -202,44 +266,6 @@ class CommandProducts:
         self.db.commit()
 
 
-class QueryBrands:
-    name = 'query_brands'
-
-    @event_handler('command_brands', 'replicate_db_event')
-    def normalize_db(self, data):
-        try:
-            brand = QueryBrandModel.objects.get(id=data['id'])
-            brand.update(
-                name=data['name']
-            )
-            brand.reload()
-        except mongoengine.DoesNotExist:
-            QueryBrandModel(id=data['id'], name=data['name']).save()
-        except Exception as e:
-            return e
-
-    @rpc
-    def get(self, id):
-        try:
-            brand = QueryBrandModel.objects.get(id=id)
-            return brand.to_json()
-        except mongoengine.DoesNotExist as e:
-            return e
-        except Exception as e:
-            return e
-
-    @rpc
-    def list(self, num_page, limit):
-        try:
-            if not num_page:
-                num_page = 1
-            offset = (num_page - 1) * limit
-            brands = QueryBrandModel.objects.skip(offset).limit(limit)
-            return brands.to_json()
-        except Exception as e:
-            return e
-
-
 class QueryProducts:
     name = 'query_products'
 
@@ -248,25 +274,63 @@ class QueryProducts:
         try:
             product = QueryProductsModel.objects.get(id=data['id'])
             product.update(
-                name=data['name'],
-                description=data['description'],
-                price=data['price'],
-                available_stock=data['available_stock'],
-                max_stock_threshold=data['max_stock_threshold'],
-                on_reorder=data['on_reorder'],
-                reorder_threshold=data['reorder_threshold']
+                name=data.get('name', product.name),
+                description=data.get('description', product.description),
+                price=data.get('price', product.price),
+                available_stock=data.get('available_stock', product.available_stock),
+                max_stock_threshold=data.get('max_stock_threshold', product.max_stock_threshold),
+                on_reorder=data.get('on_reorder', product.on_reorder),
+                reorder_threshold=data.get('restock_threshold', product.restock_threshold),
+                product_brand_id=data.get('product_brand_id', product.product_brand_id),
+                updated_at=data.get('updated_at', product.updated_at),
+                sku=str(data.get('sku', product.sku))
             )
             product.reload()
         except mongoengine.DoesNotExist:
-            QueryBrandModel(
+            logger.info('Creating a new product in Query DB')
+
+            QueryProductsModel(
                 id=data['id'],
                 name=data['name'],
                 description=data['description'],
                 price=data['price'],
                 available_stock=data['available_stock'],
                 max_stock_threshold=data['max_stock_threshold'],
-                on_reorder=data['on_reorder'],
-                reorder_threshold=data['reorder_threshold']
+                on_reorder=data.get('on_reorder', False),
+                restock_threshold=data['restock_threshold'],
+                product_brand_id=data['product_brand_id'],
+                created_at=data['created_at'],
+                updated_at=data['updated_at'],
+                sku=str(data['sku']),
+                shipping_details=ShippingDetailsModel(
+                    weight=data.get('weight', 0),
+                    width=data.get('width', 0),
+                    height=data.get('height', 0),
+                    depth=data.get('depth', 0)
+                )
             ).save()
+        except Exception as e:
+            return e
+
+    @rpc
+    def list(self, num_page, limit):
+        """ returns all the products requested"""
+        try:
+            if not num_page:
+                num_page = 1
+            offset = (num_page - 1) * limit
+            products = QueryProductsModel.objects  # .skip(offset).limit(limit)
+            return products.to_json()
+        except Exception as e:
+            return e
+
+    @rpc
+    def get(self, id):
+        """ returns a product based on the provided ID"""
+        try:
+            product = QueryProductsModel.objects.get(id=id)
+            return product.to_json()
+        except mongoengine.DoesNotExist as e:
+            return e
         except Exception as e:
             return e

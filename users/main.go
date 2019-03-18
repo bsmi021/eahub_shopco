@@ -7,13 +7,20 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
+
+	raven "github.com/getsentry/raven-go"
 )
 
 const (
 	createUsersQueue = "CREATE_USER"
 	updateUsersQueue = "UPDATE_USER"
 	deleteUsersQueue = "DELETE_USER"
+	portAddr         = ":50051"
 )
+
+func init() {
+	raven.SetDSN("change by keep")
+}
 
 func main() {
 	var numWorkers int
@@ -25,9 +32,10 @@ func main() {
 	flag.IntVar(&cache.MaxActive, "redis_max_active", 100, "Redis Max Active")
 	flag.IntVar(&cache.IdleTimeoutSecs, "redis_timeout", 60, "Redis timeout in seconds")
 	flag.IntVar(&numWorkers, "num_workers", 10, "Number of workers to consume queue")
+	flag.Parse()
 	cache.Pool = cache.NewCachePool()
 
-	connectionString := os.Getenv("DATABASE_DEV_URL")
+	connectionString := os.Getenv("DATABASE_URL")
 
 	db, err := sqlx.Open("postgres", connectionString)
 	if err != nil {
@@ -40,5 +48,7 @@ func main() {
 
 	a := App{}
 	a.Initialize(cache, db)
+	go a.runGRPCServer(portAddr)
+	a.initializeRoutes()
 	a.Run(":3000")
 }

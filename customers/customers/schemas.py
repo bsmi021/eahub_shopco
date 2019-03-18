@@ -22,7 +22,8 @@ class CreateCustomerSchema(Schema):
     payment_method = fields.Nested('PaymentMethodSchema', many=False)
 
 class PaymentMethodSchema(Schema):
-    customer = fields.Str(required=False)
+    id = fields.Int(required=True)
+    customer_id = fields.Int(required=True)
     cardholder_name = fields.Str(required=True)
     expiration = fields.Str(required=True)
     card_number = fields.Str(required=True)
@@ -43,5 +44,8 @@ class CustomerSchema(Schema):
     zip_code = fields.Str(required=True)
     email = fields.Str(required=True)
     phone = fields.Str(required=True)
+    country = fields.Str(required=True)
     payment_methods=fields.Nested(PaymentMethodSchema, many=True)
+    created_at = fields.DateTime()
+    updated_at = fields.DateTime()
 

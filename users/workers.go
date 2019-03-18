@@ -8,6 +8,7 @@ import (
 	"sync"
 )
 
+// Worker is the struct with worker configuration values
 type Worker struct {
 	cache Cache
 	db    *sqlx.DB
@@ -15,8 +16,21 @@ type Worker struct {
 	queue string
 }
 
-func newWorker(id int, db *sqlx.DB, cache Cache,
-	queue string) Worker {
+// UsersToDB create workers to consume de queues
+func UsersToDB(numWorkers int, db *sqlx.DB, cache Cache, queue string) {
+	var wg sync.WaitGroup
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func(id int, db *sqlx.DB, cache Cache, queue string) {
+			worker := newWorker(i, db, cache, queue)
+			worker.process(i)
+			defer wg.Done()
+		}(i, db, cache, queue)
+	}
+	wg.Wait()
+}
+
+func newWorker(id int, db *sqlx.DB, cache Cache, queue string) Worker {
 	return Worker{cache: cache, db: db, id: id, queue: queue}
 }
 
@@ -25,8 +39,7 @@ func (w Worker) process(id int) {
 		conn := w.cache.Pool.Get()
 		var channel string
 		var uuid int
-		if reply, err := redigo.Values(conn.Do("BLPOP", w.queue,
-			30+id)); err == nil {
+		if reply, err := redigo.Values(conn.Do("BLPOP", w.queue, 30+id)); err == nil {
 
 			if _, err := redigo.Scan(reply, &channel, &uuid); err != nil {
 				w.cache.enqueueValue(w.queue, uuid)
@@ -56,18 +69,4 @@ func (w Worker) process(id int) {
 		}
 		conn.Close()
 	}
-}
-
-func UsersToDB(numWorkers int, db *sqlx.DB, cache Cache,
-	queue string) {
-	var wg sync.WaitGroup
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func(id int, db *sqlx.DB, cache Cache, queue string) {
-			worker := newWorker(i, db, cache, queue)
-			worker.process(i)
-			defer wg.Done()
-		}(i, db, cache, queue)
-	}
-	wg.Wait()
 }

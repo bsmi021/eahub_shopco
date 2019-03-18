@@ -1,3 +1,4 @@
 Flask
 Flask-Testing
+flask-restplus==0.12.1
 nameko

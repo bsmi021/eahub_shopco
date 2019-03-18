@@ -1,58 +1,86 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
+	"net"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/codegangsta/negroni"
+	raven "github.com/getsentry/raven-go"
 	"github.com/gorilla/mux"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
+	pb "github.com/viniciusfeitosa/BookProject/UsersService/user_data"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 )
 
+// App is the struct with app configuration values
 type App struct {
 	DB     *sqlx.DB
 	Router *mux.Router
 	Cache  Cache
 }
 
+// Initialize create the DB connection and prepare all the routes
 func (a *App) Initialize(cache Cache, db *sqlx.DB) {
-	a.Cache = cache
 	a.DB = db
+
+	a.Cache = cache
 	a.Router = mux.NewRouter()
-	a.initializeRoutes()
 }
 
 func (a *App) initializeRoutes() {
-	a.Router.HandleFunc("/users", a.getUsers).Methods("GET")
-	a.Router.HandleFunc("/user", a.createUser).Methods("POST")
-	a.Router.HandleFunc("/user/{id:[0-9]+}",
-		a.getUser).Methods("GET")
-	a.Router.HandleFunc("/user/{id:[0-9]+}",
-		a.updateUser).Methods("PUT")
-	a.Router.HandleFunc("/user/{id:[0-9]+}",
-		a.deleteUser).Methods("DELETE")
+	a.Router.HandleFunc("/all", a.getUsers).Methods("GET")
+	a.Router.HandleFunc("/", a.createUser).Methods("POST")
+	a.Router.HandleFunc("/{id:[0-9]+}", a.getUser).Methods("GET")
+	a.Router.HandleFunc("/{id:[0-9]+}", a.updateUser).Methods("PUT")
+	a.Router.HandleFunc("/{id:[0-9]+}", a.deleteUser).Methods("DELETE")
+	a.Router.HandleFunc("/healthcheck", a.healthcheck).Methods("GET")
+	a.Router.HandleFunc("/sentryerr", a.sentryerr).Methods("GET")
 }
 
+// Run initialize the server
 func (a *App) Run(addr string) {
 	n := negroni.Classic()
 	n.UseHandler(a.Router)
 	log.Fatal(http.ListenAndServe(addr, n))
 }
 
-func respondWithError(w http.ResponseWriter, code int, message string) {
-	respondWithJSON(w, code, map[string]string{"error": message})
+func (a *App) sentryerr(w http.ResponseWriter, r *http.Request) {
+	_, err := os.Open("filename.ext")
+	if err != nil {
+		raven.CaptureErrorAndWait(err, nil)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Write([]byte("OK"))
+	return
 }
 
-func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
-	response, _ := json.Marshal(payload)
+func (a *App) healthcheck(w http.ResponseWriter, r *http.Request) {
+	var err error
+	c := a.Cache.Pool.Get()
+	defer c.Close()
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	w.Write(response)
+	// Check Cache
+	_, err = c.Do("PING")
+
+	// Check DB
+	err = a.DB.Ping()
+
+	if err != nil {
+		http.Error(w, "CRITICAL", http.StatusInternalServerError)
+		return
+	}
+	w.Write([]byte("OK"))
+	return
 }
 
 func (a *App) getUser(w http.ResponseWriter, r *http.Request) {
@@ -63,15 +91,16 @@ func (a *App) getUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if value, err := a.Cache.getValue(id); err == nil && len(value) != 0 {
+	if value, err := a.getUserFromCache(id); err == nil {
+		log.Println("from cache")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(value))
 		return
 	}
 
-	user := User{ID: id}
-	if err := user.get(a.DB); err != nil {
+	user, err := a.getUserFromDB(id)
+	if err != nil {
 		switch err {
 		case sql.ErrNoRows:
 			respondWithError(w, http.StatusNotFound, "User not found")
@@ -121,9 +150,7 @@ func (a *App) createUser(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// get sequence from Postgres
 	a.DB.Get(&user.ID, "SELECT nextval('users_id_seq')")
-
 	JSONByte, _ := json.Marshal(user)
 	if err := a.Cache.setValue(user.ID, string(JSONByte)); err != nil {
 		respondWithError(w, http.StatusInternalServerError, err.Error())
@@ -178,4 +205,78 @@ func (a *App) deleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondWithJSON(w, http.StatusOK, map[string]string{"result": "success"})
+}
+
+func (a *App) getUserFromCache(id int) (string, error) {
+	if value, err := a.Cache.getValue(id); err == nil && len(value) != 0 {
+		return value, err
+	}
+	return "", errors.New("Not Found")
+}
+
+func (a *App) getUserFromDB(id int) (User, error) {
+	user := User{ID: id}
+	if err := user.get(a.DB); err != nil {
+		switch err {
+		case sql.ErrNoRows:
+			return user, err
+		default:
+			return user, err
+		}
+	}
+	return user, nil
+}
+
+func (a *App) runGRPCServer(portAddr string) {
+	lis, err := net.Listen("tcp", portAddr)
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+	s := grpc.NewServer()
+	pb.RegisterGetUserDataServer(s, &userDataHandler{app: a})
+	reflection.Register(s)
+	if err := s.Serve(lis); err != nil {
+		log.Fatalf("failed to serve: %v", err)
+	}
+}
+
+type userDataHandler struct {
+	app *App
+}
+
+func (handler *userDataHandler) composeUser(user User) *pb.UserDataResponse {
+	return &pb.UserDataResponse{
+		Id:    int32(user.ID),
+		Email: user.Email,
+		Name:  user.Name,
+	}
+}
+
+func (handler *userDataHandler) GetUser(ctx context.Context, request *pb.UserDataRequest) (*pb.UserDataResponse, error) {
+	var user User
+	var err error
+
+	if value, err := handler.app.getUserFromCache(int(request.Id)); err == nil {
+		if err = json.Unmarshal([]byte(value), &user); err != nil {
+			return nil, err
+		}
+		return handler.composeUser(user), nil
+	}
+
+	if user, err = handler.app.getUserFromDB(int(request.Id)); err == nil {
+		return handler.composeUser(user), nil
+	}
+	return nil, err
+}
+
+func respondWithError(w http.ResponseWriter, code int, message string) {
+	respondWithJSON(w, code, map[string]string{"error": message})
+}
+
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
+	response, _ := json.Marshal(payload)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	w.Write(response)
 }

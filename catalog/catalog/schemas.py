@@ -3,8 +3,8 @@ from marshmallow import Schema, fields
 class ProductBrandSchema(Schema):
     id = fields.Int(required=True)
     name = fields.Str(required=True)
-    created_at = fields.DateTime()
-    updated_at = fields.DateTime()
+    created_at = fields.String()
+    updated_at = fields.String()
 
 class ProductSchema(Schema):
     id = fields.Int(required=True)
@@ -18,6 +18,7 @@ class ProductSchema(Schema):
     product_brand = fields.Nested(ProductBrandSchema, many=False)
     created_at = fields.DateTime()
     updated_at = fields.DateTime()
+    sku = fields.Str()
 
 
 class OrderStockItemSchema(Schema):
