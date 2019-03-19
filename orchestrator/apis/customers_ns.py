@@ -1,7 +1,7 @@
 # ./orchestrator/orchestrator/api/catalog/products_ns.py
 import logging
 import os
-from flask import request, jsonify
+from flask import request, jsonify, Response
 from flask_restplus import Resource, Namespace, fields
 from nameko.standalone.rpc import ClusterRpcProxy
 import json
@@ -61,7 +61,7 @@ customer_with_payment_methods = api.inherit('Customer with Payment Methods',
 @api.route('')
 class CustomersCollection(Resource):
 
-    @api.marshal_with(customer, as_list=True, envelope='customers')
+    #@api.marshal_with(customer, as_list=True, envelope='customers')
     def get(self, num_pages=5, limit=100):
         """
         returns a list of customers
@@ -71,7 +71,9 @@ class CustomersCollection(Resource):
         """
         with ClusterRpcProxy(CONFIG_RPC) as rpc:
             response_data = rpc.query_customers.list(num_pages, limit)
-            return json.loads(response_data), 200
+            return Response(response=response_data,
+                            status=200,
+                            mimetype='application/json')
 
     @api.expect(customer)
     @api.response(201, 'Customer Created')
@@ -86,7 +88,7 @@ class CustomersCollection(Resource):
 @api.response(404, 'Customer not found')
 class CustomersItem(Resource):
 
-    @api.marshal_with(customer_with_payment_methods, envelope='customer', as_list=False)
+    #@api.marshal_with(customer_with_payment_methods, envelope='customer', as_list=False)
     def get(self, id):
         """
         Get's a single customer based on the provided ID
@@ -98,7 +100,9 @@ class CustomersItem(Resource):
 
             logger.info('Found customer: {}'.format(response_data))
 
-            return json.loads(response_data)
+            return Response(response=response_data,
+                            status=200,
+                            mimetype='application/json')
 
     @api.expect(customer)
     @api.response(204, 'Customer successfully updated')

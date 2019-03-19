@@ -10,9 +10,6 @@ COPY config.yml ./
 COPY run.sh ./
 COPY orders ./orders/
 
-COPY alembic.ini ./
-COPY alembic/. ./alembic/
-
 RUN chmod +x ./run.sh
 
 CMD ["./run.sh"]

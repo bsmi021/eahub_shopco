@@ -1,7 +1,7 @@
-from marshmallow import Schema, fields
+from marshmallow import Schema, fields, post_load
 
-class BasketCheckout(Schema):
-    id = fields.Str(required=True)
+class BasketCheckoutSchema(Schema):
+    buyer_id = fields.Str(required=True)
     buyer = fields.Str(required=True)
     city = fields.Str(required=True)
     street1 = fields.Str(required=True)
@@ -16,7 +16,7 @@ class BasketCheckout(Schema):
     card_type_id = fields.Int()
 
 
-class BasketItem(Schema):
+class BasketItemSchema(Schema):
     id = fields.Str(required=True)
     product_id = fields.Int(required=True)
     product_name = fields.Str()
@@ -25,6 +25,8 @@ class BasketItem(Schema):
     quantity = fields.Int()
 
 
-class Basket(Schema):
+class CustomerBasketSchema(Schema):
     buyer_id = fields.Str(required=True)
-    items = fields.Nested(BasketItem, many=True)
+    items = fields.Nested(BasketItemSchema, many=True)
+
+

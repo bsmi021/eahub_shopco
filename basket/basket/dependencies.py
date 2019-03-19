@@ -1,7 +1,10 @@
 from nameko.extensions import DependencyProvider
+from nameko_redis import Redis
 import redis
 from .exceptions import NotFound
 import json
+import pickle
+
 from .schemas import *
 
 REDIS_URI_KEY = 'REDIS_URI'
@@ -23,19 +26,23 @@ class StorageWrapper:
 
     def get(self, customer_id):
         basket = self.client.get(customer_id)
-        if not basket:
-            return NotFound('Basket for {} not found'.format(customer_id))
-        else:
-            return json.loads(basket)
+
+        return basket
 
     def update(self, basket):
+        """
+        Creates/Updates a basket in the repository
+        :param basket:
+        :return:
+        """
+        obj = json.loads(basket)
 
-        created = self.client.set(basket['buyer_id'], json.dumps(basket))
+        created = self.client.set(obj.get('buyer_id'), basket)
 
         if not created:
             return None
 
-        return self.get(basket['buyer_id'])
+        return self.get(obj.get('buyer_id'))
 
     def delete(self, id):
         return self.client.delete(id)

@@ -1,7 +1,7 @@
 # ./orchestrator/orchestrator/api/catalog/products_ns.py
 import logging
 import os
-from flask import request, jsonify
+from flask import request, jsonify, Response
 from flask_restplus import Resource, Namespace, fields
 from nameko.standalone.rpc import ClusterRpcProxy
 import json
@@ -48,12 +48,14 @@ product = api.model('Product',
 
 @api.route('')
 class ProductsCollection(Resource):
-    @api.marshal_list_with(product)
+    #@api.marshal_with(product, code=200, description='Success', as_list=True)
     def get(self, num_page=5, limit=5):
         """ returns a list of products """
         with ClusterRpcProxy(CONFIG_RPC) as rpc:
             response_data = rpc.query_products.list(num_page, limit)
-            return json.loads(response_data)
+            return Response(response=response_data,
+                            status=200,
+                            mimetype='application/json')
 
     @api.expect(product)
     @api.response(201, 'Product created')
@@ -67,12 +69,14 @@ class ProductsCollection(Resource):
 
 @api.route('/<int:id>')
 class ProductItem(Resource):
-    @api.marshal_with(product)
+    #@api.marshal_with(product)
     def get(self, id):
         """ returns a single product item"""
         with ClusterRpcProxy(CONFIG_RPC) as rpc:
             response_data = rpc.query_products.get(id)
-            return json.loads(response_data)
+            return Response(response=response_data,
+                            status=200,
+                            mimetype='application/json')
 
     @api.expect(product)
     @api.response(204, 'Product successfully updated')

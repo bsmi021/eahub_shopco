@@ -1,0 +1,48 @@
+version: '2.1'
+
+services:
+  redis:
+    container_name: redis
+    image: redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: exit 0
+    restart: always
+
+  rabbit:
+    image: rabbitmq
+    build: queue
+    ports:
+      - "15672:15672"
+      - "5672:5672"
+    restart: always
+
+  basket_service:
+    build:
+      context: basket
+    depends_on:
+      - rabbit
+      - redis
+    environment:
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      RABBIT_PASSWORD: "guest"
+      RABBIT_USER: "guest"
+      RABBIT_HOST: "rabbit"
+      RABBIT_PORT: "5672"
+
+  orchestrator:
+    build:
+      context: orchestrator
+    environment:
+      RABBIT_PASSWORD: "guest"
+      RABBIT_USER: "guest"
+      RABBIT_HOST: "rabbit"
+      RABBIT_PORT: "5672"
+      PYTHONPATH: "."
+    ports:
+      - "5000:5000"
+    depends_on:
+      - rabbit
+      - basket_service

@@ -8,8 +8,9 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from enum import Enum, IntEnum
 from .exceptions import OrderingException
+from py_linq import Enumerable
 
-__schema__ = 'Orders'
+from nameko.events import EventDispatcher
 
 
 class Base(object):
@@ -28,7 +29,7 @@ class Base(object):
 DeclarativeBase = declarative_base(cls=Base)
 
 
-class Address(DeclarativeBase):
+class CommandAddressModel(DeclarativeBase):
     __tablename__ = 'addresses'
     # __table_args__ = {'schema': __schema__}
 
@@ -40,6 +41,15 @@ class Address(DeclarativeBase):
     country = Column(String, nullable=False, default='US')
     zip_code = Column(String, nullable=False)
 
+    def __init__(self, street_1, street_2, city, state, country, zip_code):
+        self.street1 = street_1
+        self.street2 = street_2
+        self.city = city
+        self.state = state
+        self.country = country
+        self.zip_code = zip_code
+
+
 
 class OrderStatus(IntEnum):
     Submitted = 1
@@ -50,23 +60,26 @@ class OrderStatus(IntEnum):
     Cancelled = 6
 
 
-class Order(DeclarativeBase):
+class CommandOrderModel(DeclarativeBase):
     __tablename__ = 'orders'
     # __table_args__ = {'schema': __schema__}
 
-    id = Column(BigInteger, primary_key=True)
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
     customer_id = Column(String, nullable=False)
     address_id = Column(
         BigInteger,
         ForeignKey('addresses.id', name='fk_order_address'),
         nullable=False
     )
-    address = relationship(Address)
-    card_number = Column(String)
-    card_security_number = Column(String)
-    cardholder_name = Column(String)
-    card_expiration = Column(String)
-    payment_method_id = Column(String)
+    address = relationship(CommandAddressModel)
+    buyer_id = Column(Integer,
+                      ForeignKey('buyers.id', name='fk_order_buyers'))
+    buyer = relationship('CommandBuyerModel', backref='order')
+
+    payment_method_id = Column(Integer,
+                               ForeignKey('payment_methods.id', name='fk_order_payment_methods'))
+    payment_method = relationship('CommandPaymentMethodModel')
+
     order_status_id = Column(Integer)
     order_date = Column(DateTime)
     is_draft = Column(Boolean, default=False)
@@ -74,9 +87,12 @@ class Order(DeclarativeBase):
 
     order_items = []
 
-    def __init__(self):
-        self.id = str(uuid4().__hash__())
+    def __init__(self, customer_id, address, card_type_id, card_number, security_number,
+                 cardholder_name, expiration):
         self.order_status_id = OrderStatus.Submitted.value
+        self.customer_id = customer_id
+        self.address = address
+
 
     def add_order_item(self, order_item):
         self.order_items.append(order_item)
@@ -133,13 +149,13 @@ class Order(DeclarativeBase):
             f'It is not possible to change the order status from {self.order_status_id} to {order_status_to_change}')
 
 
-class OrderDetail(DeclarativeBase):
+class CommandOrderItemModel(DeclarativeBase):
     __tablename__ = 'order_details'
     # __table_args__ = {'schema': __schema__}
 
     id = Column(BigInteger, primary_key=True)
     order_id = Column(BigInteger, ForeignKey('orders.id', name='fk_order_details_order'))
-    order = relationship(Order, backref='order_items')
+    order = relationship(CommandOrderModel, backref='order_items')
     product_id = Column(Integer)
     product_name = Column(String)
     unit_price = Column(Float)
@@ -160,3 +176,60 @@ class OrderDetail(DeclarativeBase):
             raise OrderingException('Invalid discount')
 
         self.discount = discount
+
+
+class CommandBuyerModel(DeclarativeBase):
+    __tablename__ = 'buyers'
+    id = Column(BigInteger, primary_key=True)
+    user_id = Column(BigInteger, nullable=False)
+    name = Column(String, nullable=False)
+    payment_methods = []
+
+
+    def __init__(self, user_id, name):
+        self.user_id = user_id
+        self.name = name
+
+    def verify_or_add_payment_method(self, alias, card_number, security_number, card_type_id,
+                                     cardholder_name, expiration):
+        existing_payment = Enumerable(self.payment_methods) \
+            .where(lambda x: x.is_equal_to(card_type_id, card_number, expiration)) \
+            .first_or_default()
+
+        if existing_payment is not None:
+            return existing_payment
+        else:
+            payment = CommandPaymentMethodModel()
+            payment.buyer = self
+            payment.card_number = card_number
+            payment.expiration = expiration
+            payment.card_type_id = card_type_id
+            payment.alias = alias
+            payment.cardholder_name = cardholder_name
+            payment.security_number = security_number
+
+            self.payment_methods.append(payment)
+
+            return payment
+
+
+class CommandPaymentMethodModel(DeclarativeBase):
+    __tablename__ = 'payment_methods'
+
+    id = Column(BigInteger, primary_key=True)
+    buyer_id = Column(BigInteger,
+                      ForeignKey('buyers.id', name='fk_payment_methods_buyers'))
+    buyer = relationship(CommandBuyerModel, backref='payment_methods')
+    card_type_id = Column(Integer)
+    cardholder_name = Column(String)
+    alias = Column(String)
+    card_number = Column(String)
+    expiration = Column(String)
+    security_number = Column(String)
+
+    def is_equal_to(self, card_type_id, card_number, expiration):
+        return (
+                self.card_type_id == card_type_id and
+                self.card_number == card_number and
+                self.expiration == expiration
+        )

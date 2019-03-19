@@ -1,4 +1,0 @@
-nameko
-marshmallow
-flask
-flask-restplus

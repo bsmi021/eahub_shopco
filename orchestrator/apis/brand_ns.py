@@ -1,7 +1,7 @@
 # ./orchestrator/apis/catalog/brands_ns.py
 import logging
 import os
-from flask import request, jsonify
+from flask import request, jsonify, Response
 from flask_restplus import Resource, Namespace, fields
 from nameko.standalone.rpc import ClusterRpcProxy
 import json
@@ -31,12 +31,14 @@ brand = api.model('Brand',
 @api.route('')
 class BrandsCollection(Resource):
 
-    @api.marshal_list_with(brand)
+    #@api.marshal_list_with(brand)
     def get(self, num_page=5, limit=5):
         """ returns a list of brands """
         with ClusterRpcProxy(CONFIG_RPC) as rpc:
             response_data = rpc.query_brands.list(num_page, limit)
-            return json.loads(response_data)
+            return Response(response=response_data,
+                            status=200,
+                            mimetype='application/json')
 
     @api.expect(brand)
     @api.response(201, 'Brand created')
@@ -50,12 +52,14 @@ class BrandsCollection(Resource):
 @api.route('/<int:id>')
 class BrandsItem(Resource):
 
-    @api.marshal_with(brand)
+    #@api.marshal_with(brand)
     def get(self, id):
         """ returns a single brand item"""
         with ClusterRpcProxy(CONFIG_RPC) as rpc:
             response_data = rpc.query_brands.get(id)
-            return json.loads(response_data)
+            return Response(response=response_data,
+                            status=200,
+                            mimetype='application/json')#json.loads(response_data)
 
     @api.expect(brand)
     @api.response(204, 'Brand successfully updated')

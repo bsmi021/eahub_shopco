@@ -10,69 +10,69 @@ services:
   #    test: exit 0
   #  restart: always
 
-  rabbitmq:
-    image: rabbitmq
+  rabbit:
+    #image: rabbitmq
     build: queue
     ports:
       - "15672:15672"
       - "5672:5672"
     restart: always
 
-  querydb_catalog:
-    build: catalog/query_db/
+  querydb_orders:
+    build: orders/query_db/
     ports:
-      - "27018:27017"
+      - "27020:27017"
     restart: always
 
-  commanddb_catalog:
-    build: catalog/command_db/
+  commanddb_orders:
+    build: orders/command_db/
     ports:
-      - "5435:5432"
+      - "5440:5432"
     healthcheck:
       test: exit 0
     restart: always
 
-  catalog_service:
+  orders_service:
     build:
       context:
-        catalog
+        orders
     environment:
       - RABBIT_PASSWORD=guest
       - RABBIT_USER=guest
-      - RABBIT_HOST=rabbitmq
+      - RABBIT_HOST=rabbit
       - RABBIT_PORT=5672
       - DB_PASSWORD=password
       - DB_USER=postgres
-      - DB_HOST=commanddb_catalog
-      - DB_NAME=catalog
+      - DB_HOST=commanddb_orders
+      - DB_NAME=orders
       - PYTHONPATH=.
-      - MONGO_HOST=querydb_catalog
+      - MONGO_HOST=querydb_orders
       - MONGO_PORT=27017
-      - MONGO_DATABASE=catalog
+      - MONGO_DATABASE=orders
     depends_on:
-      - querydb_catalog
-      - commanddb_catalog
-      - rabbitmq
+      - querydb_orders
+      - commanddb_orders
+      - rabbit
     links:
-      - querydb_catalog
-      - commanddb_catalog
-      - rabbitmq
+      - querydb_orders
+      - commanddb_orders
+      - rabbit
     restart: always
 
   orchestrator:
     build:
       context: orchestrator
     environment:
-      #APP_SETTINGS: "orchestrator.config.ProductionConfig"
+      APP_SETTINGS: "orchestrator.config.ProductionConfig"
       RABBIT_PASSWORD: "guest"
       RABBIT_USER: "guest"
-      RABBIT_HOST: "rabbitmq"
+      RABBIT_HOST: "rabbit"
       RABBIT_PORT: "5672"
       PYTHONPATH: "."
     ports:
       - "5000:5000"
     depends_on:
-      - rabbitmq
-      - catalog_service
+      - rabbit
+      - orders_service
 
 

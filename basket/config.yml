@@ -1,5 +1,5 @@
-AMQP_URI: amqp://${RABBIT_USER}:${RABBIT_PASSWORD}@${RABBIT_HOST}:${RABBIT_PORT}/
-REDIS_URI: redis://${REDIS_HOST}:${REDIS_PORT}/0
+AMQP_URI: amqp://${RABBIT_USER:guest}:${RABBIT_PASSWORD:guest}@${RABBIT_HOST:localhost}:${RABBIT_PORT:5672}/
+REDIS_URI: redis://${REDIS_HOS:localhost}:${REDIS_PORT:6379}/0
 REDIS_URIS:
-  development: redis://${REDIS_HOST}:${REDIS_PORT}/0
+  development: redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}/0
 
