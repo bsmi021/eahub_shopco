@@ -63,7 +63,7 @@ services:
     build:
       context: orchestrator
     environment:
-      APP_SETTINGS: "orchestrator.config.ProductionConfig"
+      #APP_SETTINGS: "orchestrator.config.ProductionConfig"
       RABBIT_PASSWORD: "guest"
       RABBIT_USER: "guest"
       RABBIT_HOST: "rabbit"

@@ -39,16 +39,16 @@ checkout_basket = api.model('BasketCheckout',
                                 buyer_id=fields.String(),
                                 buyer=fields.String(),
                                 city=fields.String(required=True),
-                                street1=fields.String(required=True),
-                                street2=fields.String(),
+                                street_1=fields.String(required=True),
+                                street_2=fields.String(),
                                 state=fields.String(),
                                 country=fields.String(required=True),
                                 zip_code=fields.String(required=True),
-                                card_number=fields.String(),
-                                card_holder_name=fields.String(),
-                                card_expiration=fields.String(),
-                                card_security_number=fields.String(),
-                                card_type_id=fields.Integer()
+                                card_number=fields.String(required=True),
+                                cardholder_name=fields.String(required=True),
+                                expiration=fields.String(required=True),
+                                security_number=fields.String(required=True),
+                                card_type_id=fields.Integer(required=True)
                             ))
 
 @api.route('')

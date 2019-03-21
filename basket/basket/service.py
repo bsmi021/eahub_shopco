@@ -109,9 +109,12 @@ class BasketService:
     @event_handler(ORDERS_SERVICE, 'order_started')
     def remove_basket_on_order_start(self, payload):
         try:
-            payload = json.loads(payload).data
+            if isinstance(payload, str):
+                payload = json.loads(payload).data
 
-            self.storage.delete(payload['user_id'])
+            self.delete(payload['user_id'])
+
+            logger.info(f'{dt.utcnow()}: Basket removed for user: {payload["user_id"]}')
         except Exception as e:
-            logging.error(f'Unable to remove basket for user. {e}')
+            logging.error(f'{dt.utcnow()}: Unable to remove basket for user. {e}')
 

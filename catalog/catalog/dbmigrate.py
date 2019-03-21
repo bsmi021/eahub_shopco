@@ -13,7 +13,7 @@ def create_db():
     db_url = 'postgresql://{}:{}@{}:{}/catalog'.format(db_user, db_password, db_host, db_port)
 
     db = create_engine(db_url)
-    db.execute('CREATE SEQUENCE IF NOT EXISTS news_id_seq START 1;')
+    db.execute('CREATE SEQUENCE IF NOT EXISTS product_id_seq START 1;')
     DeclarativeBase.metadata.create_all(db)
 
 

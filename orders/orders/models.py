@@ -50,7 +50,6 @@ class CommandAddressModel(DeclarativeBase):
         self.zip_code = zip_code
 
 
-
 class OrderStatus(IntEnum):
     Submitted = 1
     AwaitingValidation = 2,
@@ -60,7 +59,7 @@ class OrderStatus(IntEnum):
     Cancelled = 6
 
 
-class CommandOrderModel(DeclarativeBase):
+class Order(DeclarativeBase):
     __tablename__ = 'orders'
     # __table_args__ = {'schema': __schema__}
 
@@ -74,28 +73,50 @@ class CommandOrderModel(DeclarativeBase):
     address = relationship(CommandAddressModel)
     buyer_id = Column(Integer,
                       ForeignKey('buyers.id', name='fk_order_buyers'))
-    buyer = relationship('CommandBuyerModel', backref='order')
+    buyer = relationship('Buyer', backref='order')
 
     payment_method_id = Column(Integer,
                                ForeignKey('payment_methods.id', name='fk_order_payment_methods'))
-    payment_method = relationship('CommandPaymentMethodModel')
+    payment_method = relationship('PaymentMethod')
 
     order_status_id = Column(Integer)
-    order_date = Column(DateTime)
+    order_date = Column(DateTime, default=datetime.datetime.utcnow())
     is_draft = Column(Boolean, default=False)
     description = Column(String, nullable=True)
 
     order_items = []
 
-    def __init__(self, customer_id, address, card_type_id, card_number, security_number,
-                 cardholder_name, expiration):
+    def __init__(self, customer_id, address):
         self.order_status_id = OrderStatus.Submitted.value
         self.customer_id = customer_id
         self.address = address
+        self.order_date = datetime.datetime.utcnow()
 
+    def get_total(self):
+        return Enumerable(self.order_items).sum(lambda x: x.units * x.unit_price)
 
-    def add_order_item(self, order_item):
-        self.order_items.append(order_item)
+    def add_order_item(self, product_id, product_name, unit_price, units=1, discount=0):
+        """
+        Checks to see if the order line item exists, updates the discount and units, otherwise
+        it will create the item and add it to the order
+        :param product_id:
+        :param product_name:
+        :param unit_price:
+        :param units:
+        :param discount:
+        :return:
+        """
+        existing_order_line = Enumerable(self.order_items) \
+            .where(lambda x: x.product_id == product_id).first_or_default()
+
+        if existing_order_line is not None:
+            if discount > existing_order_line.discount:
+                existing_order_line.set_new_discount(discount)
+
+            existing_order_line.add_units(units)
+        else:
+            order_item = OrderItem(product_id, product_name, unit_price, units, discount)
+            self.order_items.append(order_item)
 
     def set_awaiting_validation_status(self):
         if self.order_status_id == OrderStatus.Submitted.value:
@@ -108,7 +129,7 @@ class CommandOrderModel(DeclarativeBase):
 
         self.order_status_id = OrderStatus.Cancelled.value
         self.description = 'The order was cancelled'
-        super().updated_at = datetime.datetime.utcnow()
+        self.updated_at = datetime.datetime.utcnow()
 
     def set_cancelled_status_when_stock_is_rejected(self, order_stock_rejected_items: []):
         if self.order_status_id == OrderStatus.AwaitingValidation.value:
@@ -149,21 +170,25 @@ class CommandOrderModel(DeclarativeBase):
             f'It is not possible to change the order status from {self.order_status_id} to {order_status_to_change}')
 
 
-class CommandOrderItemModel(DeclarativeBase):
+class OrderItem(DeclarativeBase):
     __tablename__ = 'order_details'
     # __table_args__ = {'schema': __schema__}
 
     id = Column(BigInteger, primary_key=True)
     order_id = Column(BigInteger, ForeignKey('orders.id', name='fk_order_details_order'))
-    order = relationship(CommandOrderModel, backref='order_items')
+    order = relationship(Order, backref='order_items')
     product_id = Column(Integer)
     product_name = Column(String)
     unit_price = Column(Float)
     discount = Column(Float)
     units = Column(Integer)
 
-    def __init__(self):
-        self.id = str(uuid4())
+    def __init__(self, product_id, product_name, unit_price, units, discount=0):
+        self.product_id = product_id
+        self.product_name = product_name
+        self.unit_price = unit_price
+        self.discount = discount
+        self.units = units
 
     def add_units(self, units):
         if units < 0:
@@ -178,13 +203,12 @@ class CommandOrderItemModel(DeclarativeBase):
         self.discount = discount
 
 
-class CommandBuyerModel(DeclarativeBase):
+class Buyer(DeclarativeBase):
     __tablename__ = 'buyers'
     id = Column(BigInteger, primary_key=True)
     user_id = Column(BigInteger, nullable=False)
     name = Column(String, nullable=False)
     payment_methods = []
-
 
     def __init__(self, user_id, name):
         self.user_id = user_id
@@ -199,7 +223,7 @@ class CommandBuyerModel(DeclarativeBase):
         if existing_payment is not None:
             return existing_payment
         else:
-            payment = CommandPaymentMethodModel()
+            payment = PaymentMethod()
             payment.buyer = self
             payment.card_number = card_number
             payment.expiration = expiration
@@ -213,13 +237,13 @@ class CommandBuyerModel(DeclarativeBase):
             return payment
 
 
-class CommandPaymentMethodModel(DeclarativeBase):
+class PaymentMethod(DeclarativeBase):
     __tablename__ = 'payment_methods'
 
     id = Column(BigInteger, primary_key=True)
     buyer_id = Column(BigInteger,
                       ForeignKey('buyers.id', name='fk_payment_methods_buyers'))
-    buyer = relationship(CommandBuyerModel, backref='payment_methods')
+    buyer = relationship(Buyer, backref='payment_methods')
     card_type_id = Column(Integer)
     cardholder_name = Column(String)
     alias = Column(String)

@@ -5,10 +5,11 @@ from nameko.events import EventDispatcher, event_handler
 from nameko.rpc import rpc
 from nameko.timer import timer
 from nameko_sqlalchemy import DatabaseSession
-
+from sqlalchemy import Sequence
 from .exceptions import NotFound
 from .models import *
-from .schemas import *
+
+import json
 
 import mongoengine
 
@@ -16,9 +17,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+REPLICATE_EVENT = 'replicate_db_event'
+ORDERS_SERVICE = 'command_orders'
+BRANDS_COMMAND_SERVICE = 'command_brands'
+BRANDS_QUERY_SERVICE = 'query_brands'
+PRODUCTS_COMMAND_SERVICE = 'command_products'
+PRODUCTS_QUERY_SERVICE = 'query_products'
+
 
 class CommandBrands:
-    name = 'command_brands'
+    name = BRANDS_COMMAND_SERVICE
     dispatch = EventDispatcher()
     db = DatabaseSession(DeclarativeBase)
 
@@ -26,11 +34,15 @@ class CommandBrands:
         """ fires off a replication event,
         this expose the event-sourcing pattern which will send the
         record to the query database from the command database """
-        self.dispatch('replicate_db_event', data)
+        self.dispatch(REPLICATE_EVENT, data)
 
     @rpc
-    def add(self, brand):
-        name = brand.get('name')
+    def add(self, payload):
+
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+
+        name = payload.get('name')
 
         item = ProductBrand()
         item.name = name
@@ -38,29 +50,34 @@ class CommandBrands:
         self.db.add(item)
         self.db.commit()
 
-        data = ProductBrandSchema().dump(item).data
+        payload['id'] = item.id
+        payload['updated_at'] = item.updated_at
+        payload['created_at'] = item.created_at
 
-        self.fire_replicate_db_event(data)
+        self.fire_replicate_db_event(payload)
 
-        return data
+        return payload
 
     @rpc
     def update(self, id, payload):
-        u_product_brand = self.db.query(ProductBrand).get(id)
+        brand = self.db.query(ProductBrand).get(id)
 
-        if u_product_brand is None:
+        if brand is None:
             raise NotFound()
 
-        u_product_brand.name = payload.get('name')
-        u_product_brand.updated_at = datetime.datetime.utcnow()
+        brand.name = payload.get('name')
+        brand.updated_at = datetime.datetime.utcnow()
 
+        self.db.add(brand)
         self.db.commit()
 
-        data = ProductBrandSchema().dump(u_product_brand).data
+        payload['id'] = brand.id
+        payload['created_at'] = brand.created_at
+        payload['updated_at'] = brand.updated_at
 
-        self.fire_replicate_db_event(data)
+        self.fire_replicate_db_event(payload)
 
-        return data
+        return payload
 
     @rpc
     def delete(self, id):
@@ -70,9 +87,9 @@ class CommandBrands:
 
 
 class QueryBrands:
-    name = 'query_brands'  # this is the service name
+    name = BRANDS_QUERY_SERVICE  # this is the service name
 
-    @event_handler('command_brands', 'replicate_db_event')
+    @event_handler(BRANDS_COMMAND_SERVICE, REPLICATE_EVENT)
     def normalize_db(self, data):
         try:
             brand = QueryBrandModel.objects.get(
@@ -116,22 +133,26 @@ class QueryBrands:
 
 
 class CommandProducts:
-    name = 'command_products'
+    name = PRODUCTS_COMMAND_SERVICE
     dispatch = EventDispatcher()
     db = DatabaseSession(DeclarativeBase)
 
     def fire_replicate_db_event(self, data):
-        self.dispatch('replicate_db_event', data)
+        self.dispatch(REPLICATE_EVENT, data)
 
     @rpc
-    def add(self, data):
+    def add_product(self, data):
 
         try:
+
+            if isinstance(data, str):
+                data = json.loads(data)
+
             brand = self.db.query(ProductBrand) \
                 .get(data['product_brand_id'])
 
             if brand is None:
-                raise NotFound()
+                raise NotFound('Brand not found, cannot add product.')
 
             product = Product()
 
@@ -144,10 +165,11 @@ class CommandProducts:
             product.restock_threshold = data['restock_threshold']
             product.max_stock_threshold = data['max_stock_threshold']
             product.on_reorder = data.get('on_reorder', False)
-            product.weight = data.get('weight', 0)
-            product.width = data.get('width', 0)
-            product.height = data.get('height', 0)
-            product.depth = data.get('depth', 0)
+            if data.get('shipping_details') is not None:
+                product.weight = data['shipping_details'].get('weight', 0)
+                product.width = data['shipping_details']['width']
+                product.height = data['shipping_details']['height']
+                product.depth = data['shipping_details']['depth']
 
             self.db.add(product)
             self.db.commit()
@@ -161,33 +183,45 @@ class CommandProducts:
             return data
         except Exception as e:
             self.db.rollback()
+            logger.error(f'{datetime.datetime.utcnow()}: There was an error saving this product: {e}')
             return e
 
     @rpc
     def update_product(self, payload):
-        u_product = self.db.query(Product).get(payload['id'])
 
-        if u_product is None:
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+
+        product = self.db.query(Product).get(payload['id'])
+
+        if product is None:
             raise NotFound()
 
-        product = payload['product']
+        # product = payload['product']
 
-        u_product.name = product['name']
-        u_product.description = product['description']
-        u_product.price = product['price']
-        u_product.available_stock = product['available_stock']
-        u_product.restock_threshold = product['restock_threshold']
-        u_product.max_stock_threshold = product['max_stock_threshold']
+        product.name = payload['name']
+        product.description = payload['description']
+        product.price = payload['price']
+        product.available_stock = payload['available_stock']
+        product.restock_threshold = payload['restock_threshold']
+        product.max_stock_threshold = payload['max_stock_threshold']
+        product.updated_at = datetime.datetime.utcnow()
 
-        u_product.updated_at = datetime.datetime.utcnow()
+        if payload.get('shipping_details') is not None:
+            product.weight = payload['shipping_details'].get('weight', product.weight)
+            product.width = payload['shipping_details'].get('width', product.width)
+            product.height = payload['shipping_details'].get('height', product.height)
+            product.depth = payload['shipping_details'].get('depth', product.depth)
 
         self.db.commit()
 
-        data = ProductSchema().dump(u_product).data
+        payload['updated_at'] = product.updated_at
 
-        self.fire_replicate_db_event(data)
+        # d#ata = ProductSchema().dump(product).data
 
-        return data
+        self.fire_replicate_db_event(payload)
+
+        return payload
 
     @rpc
     def delete_product(self, id):
@@ -195,18 +229,15 @@ class CommandProducts:
         self.db.delete(product)
         self.db.commit()
 
-    @event_handler('orders_service', 'order_paid')
+    @event_handler(ORDERS_SERVICE, 'order_status_changed_to_paid')
     def handle_order_status_changed_paid(self, payload):
         """
         This will remove items from stock for items from an order.
-
-
         :param payload:
         :return:
         """
-        schema = OrderStatusChangedToPaidEvent()
-
-        payload: OrderStatusChangedToPaidEvent = schema.loads(payload).data
+        if isinstance(payload, str):
+            payload = json.loads(payload)
 
         products = payload['order_stock_items']
 
@@ -214,16 +245,31 @@ class CommandProducts:
             product = self.db.query(Product).get(p['product_id'])
             product.remove_stock(p['units'])
 
-            data = ProductSchema().dumps(product).data
+            self.db.commit()
+
+            data = {
+                'id': product.id,
+                'available_stock': product.available_stock,
+                'on_reorder': product.on_reorder,
+                'updated_at': product.updated_at
+            }
+
             self.fire_replicate_db_event(data)
 
-        self.db.commit()
+            logger.info(f'{datetime.datetime.utcnow()}: \
+                {p["units"]} units removed for product_id: {product.id}: there are {product.available_stock} \
+                units remaining')
 
-    @event_handler('orders_service', 'order_await_valid')
-    def handle_order_status_awaiting_validation(self, payload):
-        schema = OrderStatusChangedToAwaitingValidationEvent()
-
-        payload = schema.loads(payload).data
+    @event_handler(ORDERS_SERVICE, 'order_status_changed_to_awaiting_validation')
+    def verify_stock_for_order(self, payload):
+        """
+        With the provided order payload, inspect each requested product to
+        ensure there is enough stock to satisfy the order
+        :param payload:
+        :return:
+        """
+        if isinstance(payload, str):
+            payload = json.loads(payload)
 
         confirmed_order_stock_items = []
 
@@ -237,11 +283,11 @@ class CommandProducts:
         if not rejected:
             i_payload = {'order_id': payload['order_id'],
                          'order_stock_items': confirmed_order_stock_items}
-            self.event_dispatcher('rejected_order_stock', i_payload)
+            self.dispatch('rejected_order_stock', i_payload)
         else:
-            self.event_dispatcher('confirmed_order_stock', {'order_id': payload['order_id']})
+            self.dispatch('confirmed_order_stock', {'order_id': payload['order_id']})
 
-    @timer(interval=90)
+    @timer(interval=os.getenv('RESTOCK_INTERVAL', 90))
     def reorder_products(self):
         """
         Gets all products which are low on stock and reorders a
@@ -259,20 +305,35 @@ class CommandProducts:
             product.on_reorder = False
             product.updated_at = datetime.datetime.utcnow()
 
-            data = ProductSchema().dumps(product).data
+            self.db.commit()
+
+            data = {
+                'id': product.id,
+                'available_stock': product.available_stock,
+                'on_reorder': product.on_reorder,
+                'updated_at': product.updated_at
+            }
 
             self.fire_replicate_db_event(data)
 
-        self.db.commit()
-
 
 class QueryProducts:
-    name = 'query_products'
+    name = PRODUCTS_QUERY_SERVICE
 
-    @event_handler('command_products', 'replicate_db_event')
+    @event_handler(PRODUCTS_COMMAND_SERVICE, REPLICATE_EVENT)
     def normalize_db(self, data):
         try:
             product = QueryProductsModel.objects.get(id=data['id'])
+            if data.get('shipping_details') is not None:
+                shipping_details = ShippingDetailsModel(
+                    weight=data.get('shipping_details').get('weight', product.shipping_details.weight),
+                    width=data.get('shipping_details').get('width', product.shipping_details.width),
+                    height=data.get('shipping_details').get('height', product.shipping_details.height),
+                    depth=data.get('shipping_details').get('depth', product.shipping_details.depth)
+                )
+            else:
+                shipping_details = product.shipping_details
+
             product.update(
                 name=data.get('name', product.name),
                 description=data.get('description', product.description),
@@ -280,12 +341,14 @@ class QueryProducts:
                 available_stock=data.get('available_stock', product.available_stock),
                 max_stock_threshold=data.get('max_stock_threshold', product.max_stock_threshold),
                 on_reorder=data.get('on_reorder', product.on_reorder),
-                reorder_threshold=data.get('restock_threshold', product.restock_threshold),
+                restock_threshold=data.get('restock_threshold', product.restock_threshold),
                 product_brand_id=data.get('product_brand_id', product.product_brand_id),
                 updated_at=data.get('updated_at', product.updated_at),
-                sku=str(data.get('sku', product.sku))
+                sku=str(data.get('sku', product.sku)),
+                shipping_details=shipping_details
             )
             product.reload()
+            logger.info('Product Updated')
         except mongoengine.DoesNotExist:
             logger.info('Creating a new product in Query DB')
 
@@ -303,13 +366,15 @@ class QueryProducts:
                 updated_at=data['updated_at'],
                 sku=str(data['sku']),
                 shipping_details=ShippingDetailsModel(
-                    weight=data.get('weight', 0),
-                    width=data.get('width', 0),
-                    height=data.get('height', 0),
-                    depth=data.get('depth', 0)
+                    weight=data.get('shipping_details').get('weight', 0),
+                    width=data.get('shipping_details').get('width', 0),
+                    height=data.get('shipping_details').get('height', 0),
+                    depth=data.get('shipping_details').get('depth', 0)
                 )
             ).save()
+            logger.info('Product Added')
         except Exception as e:
+            logger.info(f'There was an error updating products in the QueryDB: {e}')
             return e
 
     @rpc

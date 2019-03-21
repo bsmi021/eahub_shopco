@@ -21,7 +21,7 @@ ORDER_QUERY_SERVICE = 'query_orders'
 BUYER_QUERY_SERVICE = 'query_buyers'
 PAYMENTS_SERVICE = 'command_payments'
 PRODUCTS_SERVICE = 'command_products'
-BASKET_SERVICE = 'command_basket'
+BASKET_SERVICE = 'basket_service'
 
 
 class CommandOrders:
@@ -29,78 +29,183 @@ class CommandOrders:
     dispatch = EventDispatcher()
     db = DatabaseSession(DeclarativeBase)
 
+    def fire_replicated_db_event(self, data):
+        self.dispatch(REPLICATE_DB_EVENT, json.dumps(data))
+
     def _get_order(self, order_id):
-        return self.db.query(CommandOrderModel).get(order_id)
+        return self.db.query(Order).get(order_id)
 
     def _save_order(self, order):
         self.db.add(order)
         self.db.commit()
 
+        #self.fire_replicated_db_event(order.__dict__)
+
+    @event_handler(BASKET_SERVICE, 'user_checkout_accepted')
+    def create_order_from_basket(self, payload):
+
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+
+        #self.dispatch('order_started', {'user_id': payload['user_id']})
+
+        street_1 = payload.get('street_1')
+        street_2 = payload.get('street_2')
+        city = payload.get('city')
+        state = payload.get('state')
+        zip_code = payload.get('zip_code')
+        country = payload.get('country')
+
+        address = CommandAddressModel(street_1, street_2, city, state, country, zip_code)
+
+        order = Order(payload['user_id'], address)
+
+        for item in payload.get('basket')['items']:
+            order.add_order_item(item['product_id'], item['product_name'],
+                                 item['unit_price'], item['quantity'])
+
+        self._save_order(order)
+
+        validate_buyer_payload = {
+            'user_id': payload['user_id'],
+            'user_name': payload['user_name'],
+            'card_number': payload['card_number'],
+            'cardholder_name': payload['cardholder_name'],
+            'expiration': payload['expiration'],
+            'card_type_id': payload['card_type_id'],
+            'security_number': payload['security_number'],
+            'order': {"id": order.id, "order_status_id": order.order_status_id}
+        }
+
+        self.dispatch('order_started', validate_buyer_payload)
+
+        logger.info(f'{dt.utcnow()}: order_id: {order.id} submitted for buyer_id: {payload["user_id"]}.')
+
     @event_handler(ORDER_COMMAND_SERVICE, 'order_started')
-    def validate_or_add_buyer_on_order_started(self, event_msg):
+    def validate_or_add_buyer_on_order_started(self, payload):
         """
         When an order is created, the system will check for a buyer, if the buyer does not exist in
         the buyer repository the system will create the buyer, it will then validate or add a new payment
         method for the buyer, followed by asking for the order to be changed to submitted
-        :param event_msg:
+        :param payload:
         :return:
         """
+        if isinstance(payload, str):
+            payload = json.loads(payload)
 
-        started_event = json.loads(event_msg)
-
-        buyer = self.db.query(CommandBuyerModel).filter(CommandBuyerModel.user_id == started_event['user_id']).first()
+        buyer = self.db.query(Buyer).filter(Buyer.user_id == payload['user_id']).first()
         buyer_originally_existed = buyer is not None
 
         if not buyer_originally_existed:
-            buyer = CommandBuyerModel(started_event['user_id'], started_event['user_name'])
+            buyer = Buyer(payload['user_id'], payload['user_name'])
 
         payment = buyer.verify_or_add_payment_method(f'Payment Method on {datetime.datetime.utcnow()}',
-                                                     started_event['card_number'],
-                                                     started_event['security_number'],
-                                                     started_event['card_type_id'],
-                                                     started_event['cardholder_name'],
-                                                     started_event['expiration'])
+                                                     payload['card_number'],
+                                                     payload['security_number'],
+                                                     payload['card_type_id'],
+                                                     payload['cardholder_name'],
+                                                     payload['expiration'])
 
         self.db.add(buyer)
         self.db.commit()
 
-        order_submitted = dict(
-            order_id=started_event['order']['id'],
-            order_status_id=started_event['order']['order_status_id'],
+        order_submitted_msg = dict(
+            order_id=payload['order']['id'],
+            order_status_id=payload['order']['order_status_id'],
             buyer_name=buyer.name
         )
 
-        payment = {
+        buyer_msg = {
             'buyer_id': buyer.id,
             'payment_id': payment.id,
-            'order_id': started_event['order']['id']
+            'order_id': payload['order']['id']
         }
 
         # fire message that the buyer/payment method were verified
-        self.dispatch('buyer_payment_verified', json.dumps(payment))
+        self.dispatch('buyer_payment_verified', buyer_msg)
 
         # fire message that the order should be marked as submitted
-        self.dispatch('order_status_submitted', json.dumps(order_submitted))
+        self.dispatch('order_status_submitted', order_submitted_msg)
 
         logger.info(
-            f'Buyer {buyer.id} and related payment method was validated for order_id: {started_event["order"]["id"]}')
+            f'{dt.utcnow()}: Buyer {buyer.id} and related payment method was validated for order_id: {payload["order"]["id"]}')
 
-    @event_handler(BASKET_SERVICE, 'user_checkout_accepted')
-    def checkout_accepted(self, event_msg):
-        address = CommandAddressModel(event_msg.get('street_1'),
-                                      event_msg.get('street_2', None),
-                                      event_msg.get('city'),
-                                      event_msg.get('state'),
-                                      event_msg.get('country'),
-                                      event_msg.get('zip_code'))
+    @event_handler(ORDER_COMMAND_SERVICE, 'buyer_payment_verified')
+    def buyer_payment_verified(self, event_msg):
 
+        order_id = event_msg.get('order_id')
+
+        order = self.db.query(Order).get(order_id)
+
+        if order is None:
+            raise NotFound(f'No order found for id {order_id}.')
+
+        buyer = self.db.query(Buyer).get(event_msg.get('buyer_id'))
+        payment = self.db.query(PaymentMethod).get(event_msg.get('payment_id'))
+
+        order.buyer = buyer
+        order.payment_method = payment
+
+        order.set_awaiting_validation_status()
+
+        self._save_order(order)
+
+        payload = {
+            'order_id': order.id,
+            'order_stock_items': [{'product_id': od.product_id, 'units': od.units}
+                                  for od in order.order_items]
+        }
+
+        self.dispatch('order_status_changed_to_awaiting_validation', payload)
+
+        logger.info(f'{dt.utcnow()}: order_id: {order.id} status set to Awaiting Validation')
+
+    @event_handler(ORDER_COMMAND_SERVICE, 'order_status_submitted')
+    def order_submitted(self, payload):
         pass
 
-    @event_handler(PRODUCTS_SERVICE, 'rejected_order_stock')
-    def rejected_order_stock(self, payload):
+    @event_handler(PRODUCTS_SERVICE, 'confirmed_order_stock')
+    def order_stock_confirmed(self, payload):
+        """
+        When the stock for an order is confirmed, update the order, and
+        trigger a order_stock_confirmed message
+        :param payload:
+        :return:
+        """
+
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+
         order_id = payload['order_id']
 
         order = self._get_order(order_id)
+
+        if order is None:
+            raise NotFound()
+
+        order.set_stock_confirmed_status()
+
+        self._save_order(order)
+
+        time.sleep(5)
+        self.dispatch('order_status_changed_to_stock_confirmed', {'order_id': order_id})
+
+        logger.info(f'{dt.utcnow()}: order_id: {order.id} status set to STOCK_CONFIRMED')
+
+    @event_handler(PRODUCTS_SERVICE, 'rejected_order_stock')
+    def handle_rejected_order_stock(self, payload):
+        """
+        When there is not enough inventory of one or more order_items the order is rejected due to insufficient stock.
+        :param payload:
+        :return:
+        """
+
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+
+        order_id = payload['order_id']
+
+        order = self.db.query(Order).get(order_id)
 
         if order is None:
             raise NotFound(f'No order found for order_id: {order_id}')
@@ -110,25 +215,18 @@ class CommandOrders:
 
         self._save_order(order)
 
-    @event_handler(PRODUCTS_SERVICE, 'confirmed_order_stock')
-    def rejected_order_stock(self, payload):
-        order_id = payload['order_id']
-
-        order = self._get_order(order_id)
-
-        if order is None:
-            raise NotFound(f'No order found for order_id: {order_id}')
-
-        order.set_stock_confirmed_status()
-
-        self._save_order(order)
-
-        time.sleep(15)
-        self.dispatch('order_stock_confirmed', json.dumps({'order_id': order_id}))
-
     @event_handler(PAYMENTS_SERVICE, 'order_payment_succeeded')
     def order_payment_succeeded(self, payload):
-        payload = json.loads(payload)
+        """
+        Once the payment is validated update the order to indicated that the it is paid, then fire an event
+        with a collection of the order items, the products service will pick it up and decrement inventory
+        :param payload:
+        :return:
+        """
+
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+
         order_id = payload['order_id']
 
         order = self._get_order(order_id)
@@ -138,20 +236,19 @@ class CommandOrders:
 
         order.set_paid_status()
 
-        payload = OrderStatusChangedToPaidEvent()
-        payload.order_id = order_id
+        self._save_order(order)
 
-        payload.order_stock_items = [
-            {
-                'product_id': item.product_id,
-                'units': item.units
-            }
-            for item in order.order_items
-        ]
+        payload = {
+            'order_id':order_id,
+            'order_stock_items': [{'product_id': item.product_id,
+                                   'units': item.units}
+                                  for item in order.order_items]
+        }
 
-        payload = payload.dumps(payload).data
         time.sleep(15)
-        self.dispatch('order_paid', payload)
+        self.dispatch('order_status_changed_to_paid', payload)
+
+        logger.info(f'{dt.utcnow()}: order_id: {order.id} status set to PAID.')
 
 # class OrdersService:
 #     name = 'orders_service'

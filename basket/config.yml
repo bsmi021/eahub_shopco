@@ -3,3 +3,11 @@ REDIS_URI: redis://${REDIS_HOS:localhost}:${REDIS_PORT:6379}/0
 REDIS_URIS:
   development: redis://${REDIS_HOST:localhost}:${REDIS_PORT:6379}/0
 
+LOGGING:
+  version: 1
+  handlers:
+    console:
+      class: logging.StreamHandler
+  root:
+    level: DEBUG
+    handlers: [console]

@@ -70,7 +70,9 @@ class Product(DeclarativeBase):
         self.available_stock -= removed
 
         if self.available_stock <= self.restock_threshold:
-            self.on = True
+            self.on_reorder = True
+
+        self.updated_at = datetime.datetime.utcnow()
 
         return removed
 

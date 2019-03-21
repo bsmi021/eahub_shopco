@@ -63,8 +63,8 @@ class ProductsCollection(Resource):
         """ creates a new brand"""
         data = request.json
         with ClusterRpcProxy(CONFIG_RPC) as rpc:
-            response_data = rpc.command_products.add(data)
-            return response_data, 201
+            response_data = rpc.command_products.add_product(data)
+            return response_data['id'], 201
 
 
 @api.route('/<int:id>')
@@ -83,5 +83,6 @@ class ProductItem(Resource):
     def put(self, id):
         data = request.json
         with ClusterRpcProxy(CONFIG_RPC) as rpc:
-            response_data = rpc.command_products.update(id, data)
+            data['id'] = id
+            response_data = rpc.command_products.update_product(data)
             return response_data, 204

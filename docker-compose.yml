@@ -32,17 +32,6 @@ services:
       test: exit 0
     restart: always
 
-  orders_db:
-    image: postgres
-    hostname: orders_db
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_DB: orders
-      POSTGRES_PASSWORD: "password"
-      POSTGRES_USER: "postgres"
-      restart: always
-
   users_db:
     build: ./users/db
     ports:
@@ -82,24 +71,48 @@ services:
       - users_db
       - redis
 
-  orders:
-    build:
-      context: orders
-    depends_on:
-      - orders_db
-      - rabbit
-    environment:
-      RABBIT_PASSWORD: "guest"
-      RABBIT_USER: "guest"
-      RABBIT_HOST: "rabbit"
-      RABBIT_PORT: "5672"
-      DB_PASSWORD: "password"
-      DB_USER: "postgres"
-      DB_HOST: "orders_db"
-      DB_NAME: "orders"
-      PYTHONPATH: "."
+  querydb_orders:
+    build: orders/query_db/
+    ports:
+      - "27020:27017"
+    restart: always
 
-  basket:
+  commanddb_orders:
+    build: orders/command_db/
+    ports:
+      - "5440:5432"
+    healthcheck:
+      test: exit 0
+    restart: always
+
+  orders_service:
+    build:
+      context:
+        orders
+    environment:
+      - RABBIT_PASSWORD=guest
+      - RABBIT_USER=guest
+      - RABBIT_HOST=rabbit
+      - RABBIT_PORT=5672
+      - DB_PASSWORD=password
+      - DB_USER=postgres
+      - DB_HOST=commanddb_orders
+      - DB_NAME=orders
+      - PYTHONPATH=.
+      - MONGO_HOST=querydb_orders
+      - MONGO_PORT=27017
+      - MONGO_DATABASE=orders
+    depends_on:
+      - querydb_orders
+      - commanddb_orders
+      - rabbit
+    links:
+      - querydb_orders
+      - commanddb_orders
+      - rabbit
+    restart: always
+
+  basket_service:
     build:
       context: basket
     depends_on:
@@ -112,7 +125,7 @@ services:
       RABBIT_HOST: "rabbit"
       RABBIT_PORT: "5672"
 
-  payment:
+  payment_service:
     build:
       context: payment
     depends_on:
@@ -206,6 +219,7 @@ services:
       - rabbit
       - customers_service
       - catalog_service
+      - basket_service
 
   proxy:
     build:
