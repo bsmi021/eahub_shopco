@@ -1,6 +1,6 @@
-nameko
-marshmallow
+nameko==2.11.0
+marshmallow==2.18.1
 nameko-sqlalchemy
 psycopg2-binary
-PyYAML==3.13
-mongoengine
+PyYAML==5.1
+mongoengine==0.16.3
