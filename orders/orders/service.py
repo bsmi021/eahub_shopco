@@ -1,16 +1,18 @@
 from __future__ import absolute_import
-from nameko.events import EventDispatcher, event_handler
-from nameko.rpc import rpc
+
+import json
+import logging
+import time
+from datetime import datetime as dt
+
+from nameko.events import event_handler, EventDispatcher
 from nameko_sqlalchemy import DatabaseSession
+from nameko.rpc import rpc
 
 from .exceptions import NotFound
 from .models import *
-from .schemas import *
-from datetime import datetime as dt
-from uuid import uuid4
-import time
-import json
-import logging
+
+import mongoengine
 
 logger = logging.getLogger(__name__)
 
@@ -25,65 +27,94 @@ BASKET_SERVICE = 'basket_service'
 
 
 class CommandOrders:
+    """
+    Integration service used to create and maintain the lifecycle of an order.
+    """
+
     name = ORDER_COMMAND_SERVICE
     dispatch = EventDispatcher()
     db = DatabaseSession(DeclarativeBase)
 
     def fire_replicated_db_event(self, data):
+        """
+        Fires off a database replication event with an order payload
+        :param data:
+        :return:
+        """
         self.dispatch(REPLICATE_DB_EVENT, json.dumps(data))
 
     def _get_order(self, order_id):
+        """
+        Returns an order based on the provided order id, this is an internal method only,
+        orders cannot be created from external sources, only from integration event processing.
+        :param order_id:
+        :return:
+        """
         return self.db.query(Order).get(order_id)
 
     def _save_order(self, order):
+        """
+        Saves an order to the command database, and kicks off a replication event.
+        :param order:
+        :return:
+        """
         self.db.add(order)
         self.db.commit()
 
-        #self.fire_replicated_db_event(order.__dict__)
-
-    @event_handler(BASKET_SERVICE, 'user_checkout_accepted')
-    def create_order_from_basket(self, payload):
-
-        if isinstance(payload, str):
-            payload = json.loads(payload)
-
-        #self.dispatch('order_started', {'user_id': payload['user_id']})
-
-        street_1 = payload.get('street_1')
-        street_2 = payload.get('street_2')
-        city = payload.get('city')
-        state = payload.get('state')
-        zip_code = payload.get('zip_code')
-        country = payload.get('country')
-
-        address = CommandAddressModel(street_1, street_2, city, state, country, zip_code)
-
-        order = Order(payload['user_id'], address)
-
-        for item in payload.get('basket')['items']:
-            order.add_order_item(item['product_id'], item['product_name'],
-                                 item['unit_price'], item['quantity'])
-
-        self._save_order(order)
-
-        validate_buyer_payload = {
-            'user_id': payload['user_id'],
-            'user_name': payload['user_name'],
-            'card_number': payload['card_number'],
-            'cardholder_name': payload['cardholder_name'],
-            'expiration': payload['expiration'],
-            'card_type_id': payload['card_type_id'],
-            'security_number': payload['security_number'],
-            'order': {"id": order.id, "order_status_id": order.order_status_id}
+        data = {
+            'id': order.id,
+            'customer_id': order.customer_id,
+            'address': {
+                'id': order.address.id,
+                'street_1': order.address.street1,
+                'street_2': order.address.street2,
+                'city': order.address.city,
+                'state': order.address.state,
+                'zip_code': order.address.zip_code,
+                'country': order.address.country
+            },
+            'order_status_id': order.order_status_id,
+            'order_date': str(order.order_date),
+            'description': order.description,
+            'created_at': str(order.created_at),
+            'updated_at': str(order.updated_at),
+            'order_items': [{'id': item.id,
+                             'product_id': item.product_id,
+                             'product_name': item.product_name,
+                             'unit_price': item.unit_price,
+                             'discount': item.discount,
+                             'units': item.units}
+                            for item in order.order_items]
         }
 
-        self.dispatch('order_started', validate_buyer_payload)
+        """At this point a buyer may not exist due to domain processing, check to see if it 
+        exists before trying to add it to the dictionary"""
+        if order.buyer is not None:
+            data['buyer_id'] = order.buyer_id
+            data['buyer'] = {
+                'id': order.buyer.id,
+                'name': order.buyer.name
+            }
 
-        logger.info(f'{dt.utcnow()}: order_id: {order.id} submitted for buyer_id: {payload["user_id"]}.')
+        """At this point a payment_method may not exist due to domain processing, check to see if it
+        exists before trying to add it to the dictionary"""
+        if order.payment_method is not None:
+            data['payment_method_id'] = order.payment_method_id
+            data['payment_method'] = {
+                'id': order.payment_method.id,
+                'alias': order.payment_method.alias,
+                'cardholder_name': order.payment_method.cardholder_name,
+                'expiration': order.payment_method.expiration,
+                'card_number': order.payment_method.card_number[-4:]
+            }
+
+        self.fire_replicated_db_event(data)
 
     @event_handler(ORDER_COMMAND_SERVICE, 'order_started')
     def validate_or_add_buyer_on_order_started(self, payload):
         """
+        domain event handler
+
         When an order is created, the system will check for a buyer, if the buyer does not exist in
         the buyer repository the system will create the buyer, it will then validate or add a new payment
         method for the buyer, followed by asking for the order to be changed to submitted
@@ -128,11 +159,16 @@ class CommandOrders:
         self.dispatch('order_status_submitted', order_submitted_msg)
 
         logger.info(
-            f'{dt.utcnow()}: Buyer {buyer.id} and related payment method was validated for order_id: {payload["order"]["id"]}')
+            f'{dt.utcnow()}: Buyer {buyer.id} and related payment method was validated for order_id: \
+                {payload["order"]["id"]}')
 
     @event_handler(ORDER_COMMAND_SERVICE, 'buyer_payment_verified')
     def buyer_payment_verified(self, event_msg):
-
+        """
+        domain event handler
+        :param event_msg:
+        :return:
+        """
         order_id = event_msg.get('order_id')
 
         order = self.db.query(Order).get(order_id)
@@ -162,11 +198,83 @@ class CommandOrders:
 
     @event_handler(ORDER_COMMAND_SERVICE, 'order_status_submitted')
     def order_submitted(self, payload):
+        """
+        domain event handler
+        :param payload:
+        :return:
+        """
         pass
+
+    @event_handler(ORDER_COMMAND_SERVICE, 'ship_order')
+    def ship_order(self, payload):
+        """
+        domain event handler
+        :param payload:
+        :return:
+        """
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+
+        order = self._get_order(payload['id'])
+
+        if order is None:
+            raise NotFound(f'No order found for order_id: {payload["order_id"]}')
+
+        order.set_shipped_status()
+
+        self._save_order(order)
+
+        self.dispatch('order_status_changed_to_shipped', payload)
+
+    @event_handler(BASKET_SERVICE, 'user_checkout_accepted')
+    def create_order_from_basket(self, payload):
+        """
+        integration event handler
+        :param payload:
+        :return:
+        """
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+
+        # self.dispatch('order_started', {'user_id': payload['user_id']})
+
+        street_1 = payload.get('street_1')
+        street_2 = payload.get('street_2')
+        city = payload.get('city')
+        state = payload.get('state')
+        zip_code = payload.get('zip_code')
+        country = payload.get('country')
+
+        address = CommandAddressModel(street_1, street_2, city, state, country, zip_code)
+
+        order = Order(payload['user_id'], address)
+
+        for item in payload.get('basket')['items']:
+            order.add_order_item(item['product_id'], item['product_name'],
+                                 item['unit_price'], item['quantity'])
+
+        self._save_order(order)
+
+        validate_buyer_payload = {
+            'user_id': payload['user_id'],
+            'user_name': payload['user_name'],
+            'card_number': payload['card_number'],
+            'cardholder_name': payload['cardholder_name'],
+            'expiration': payload['expiration'],
+            'card_type_id': payload['card_type_id'],
+            'security_number': payload['security_number'],
+            'order': {"id": order.id, "order_status_id": order.order_status_id}
+        }
+
+        self.dispatch('order_started', validate_buyer_payload)
+
+        logger.info(f'{dt.utcnow()}: order_id: {order.id} submitted for buyer_id: {payload["user_id"]}.')
 
     @event_handler(PRODUCTS_SERVICE, 'confirmed_order_stock')
     def order_stock_confirmed(self, payload):
         """
+        integration event handler
+
         When the stock for an order is confirmed, update the order, and
         trigger a order_stock_confirmed message
         :param payload:
@@ -195,6 +303,8 @@ class CommandOrders:
     @event_handler(PRODUCTS_SERVICE, 'rejected_order_stock')
     def handle_rejected_order_stock(self, payload):
         """
+        integration event handler
+
         When there is not enough inventory of one or more order_items the order is rejected due to insufficient stock.
         :param payload:
         :return:
@@ -218,6 +328,8 @@ class CommandOrders:
     @event_handler(PAYMENTS_SERVICE, 'order_payment_succeeded')
     def order_payment_succeeded(self, payload):
         """
+        integration event handler
+
         Once the payment is validated update the order to indicated that the it is paid, then fire an event
         with a collection of the order items, the products service will pick it up and decrement inventory
         :param payload:
@@ -239,7 +351,7 @@ class CommandOrders:
         self._save_order(order)
 
         payload = {
-            'order_id':order_id,
+            'order_id': order_id,
             'order_stock_items': [{'product_id': item.product_id,
                                    'units': item.units}
                                   for item in order.order_items]
@@ -250,145 +362,119 @@ class CommandOrders:
 
         logger.info(f'{dt.utcnow()}: order_id: {order.id} status set to PAID.')
 
-# class OrdersService:
-#     name = 'orders_service'
-#
-#     db = DatabaseSession(DeclarativeBase)
-#     fire_event = EventDispatcher()
-#
-#     @rpc
-#     def list_order(self):
-#         orders = self.db.query(Order).all()
-#
-#         result = [OrderSchema().dump(order).data
-#                   for order in orders]
-#
-#         return result
-#
-#     @rpc
-#     def get_order(self, id):
-#         order = self.db.query(Order).get(id)
-#
-#         if not order:
-#             raise NotFound('Order with id {} not found'.format(id))
-#
-#         return OrderSchema().dump(order).data
-#
-#     @rpc
-#     def create_order(self, payload):
-#         order = Order()
-#         order.id = str(uuid4().__hash__())
-#         order.customer_id = payload['customer_id']
-#         order.cardholder_name = payload['cardholder_name']
-#         order.card_number = payload['card_number']
-#         order.order_date = dt.utcnow()
-#         order.card_expiration = payload['card_expiration']
-#         order.card_security_number = payload['card_security_number']
-#         order.order_status_id = OrderStatus.AwaitingValidation.value
-#         order.is_draft = False
-#
-#         address = payload['address']
-#         order.address = Address()
-#         order.address.id = str(uuid4().__hash__())
-#         order.address.street1 = address['street1']
-#         order.address.street2 = address['street2']
-#         order.address.state = address['state']
-#         order.address.city = address['city']
-#         order.address.zip_code = address['zip_code']
-#         order.address.country = address['country']
-#
-#         order_details = payload['order_items']
-#
-#         for od in order_details:
-#             order_detail = OrderDetail()
-#             order_detail.id = str(uuid4().__hash__())
-#             order_detail.product_id = od['product_id']
-#             order_detail.product_name = od['product_name']
-#             order_detail.units = od['units']
-#             order_detail.discount = od['discount']
-#             order_detail.unit_price = od['unit_price']
-#
-#             order.order_items.append(order_detail)
-#
-#         self.db.add(order)
-#         self.db.commit()
-#
-#         payload = {
-#             'order_id': order.id,
-#             'order_stock_items': [{'product_id': od.product_id, 'units': od.units}
-#                                   for od in order.order_items]
-#         }
-#
-#         order_data = OrderStatusChangedToAwaitingValidationEvent().dumps(payload).data
-#
-#         order = OrderSchema().dump(order).data
-#         self.fire_event('order_await_valid', order_data)
-#
-#         return order
-#
-#     @rpc
-#     def update_order(self, payload):
-#         pass
-#
-#     @event_handler('products_service', 'rejected_order_stock')
-#     def handle_rejected_order_stock(self, payload):
-#         order_id = payload['order_id']
-#
-#         order = self.db.query(Order).get(order_id)
-#
-#         if order is None:
-#             raise NotFound()
-#
-#         rejected_stock = [item['product_id'] for item in payload['order_stock_items']]
-#         order.set_cancelled_status_when_stock_is_rejected(rejected_stock)
-#
-#         self.db.add(order)
-#         self.db.commit()
-#
-#     @event_handler('products_service', 'confirmed_order_stock')
-#     def handle_confirmed_order_stock(self, payload):
-#         order_id = payload['order_id']
-#
-#         order = self.db.query(Order).get(order_id)
-#
-#         if order is None:
-#             raise NotFound()
-#
-#         order.set_stock_confirmed_status()
-#
-#         self.db.add(order)
-#         self.db.commit()
-#
-#         time.sleep(5)
-#         self.fire_event('confirmed_order_stock', {'order_id': order_id})
-#
-#         # raise NotImplementedError()
-#
-#     @event_handler('payments_service', 'order_payment_succeeded')
-#     def handle_order_payment_succeeded(self, payload):
-#         order_id = payload['order_id']
-#
-#         order = self.db.query(Order).get(order_id)
-#
-#         if order is None:
-#             raise NotFound()
-#
-#         order.set_paid_status()
-#
-#         self.db.add(order)
-#         self.db.commit()
-#
-#         payload = OrderStatusChangedToPaidEvent()
-#         payload.order_id = order_id
-#
-#         payload.order_stock_items = [
-#             {
-#                 'product_id': item.product_id,
-#                 'units': item.units
-#             }
-#             for item in order.order_items
-#         ]
-#
-#         payload = payload.dumps(payload).data
-#         time.sleep(5)
-#         self.fire_event('order_paid', payload)
+
+class QueryOrders:
+    """
+    Query service for external access to order information, this is a
+    read-only service.
+    """
+    name = ORDER_QUERY_SERVICE
+
+    @event_handler(ORDER_COMMAND_SERVICE, REPLICATE_DB_EVENT)
+    def normalize_db(self, data):
+        """ used to write changes into the orders query db"""
+        if isinstance(data, str):
+            data = json.loads(data)
+        try:
+            buyer = None
+            payment_method = None
+            print('No Buyer' if data['buyer'] is None else data['buyer']['id'])
+            if data['buyer'] is not None:
+                buyer = QueryBuyerModel(
+                    id=data['buyer']['id'],
+                    name=data['buyer']['name']
+                )
+            if data['payment_method'] is not None:
+                payment_method = QueryPaymentMethod(
+                    id=data['payment_method']['id'],
+                    alias=data['payment_method']['alias'],
+                    cardholder_name=data['payment_method']['cardholder_name'],
+                    expiration=data['payment_method']['expiration'],
+                    card_number=data['payment_method']['card_number']
+                )
+
+            order = QueryOrderModel.objects.get(id=data['id'])
+            order.update(
+                customer_id=data.get('customer_id', order.customer_id),
+                order_status_id=data.get('order_status_id', order.order_status_id),
+                description=data.get('description', order.description),
+                updated_at=data.get('updated_at', order.updated_at),
+                created_at=data.get('created_at', order.created_at),
+                buyer_id=data.get('buyer_id', 0),
+                order_date=data.get('order_date', order.order_date),
+                buyer=buyer,
+                payment_method=payment_method
+            )
+
+
+            order.reload()
+            logger.info(f'{dt.utcnow()}: Order Id {data["id"]} has been updated in the query database.')
+        except mongoengine.DoesNotExist:
+            """ Create the order in the query database since it doesn't exist already"""
+            QueryOrderModel(
+                id=data['id'],
+                customer_id=data['customer_id'],
+                order_status_id=data['order_status_id'],
+                order_date=data['order_date'],
+                updated_at=data['updated_at'],
+                created_at=data['created_at'],
+                buyer_id=data.get('buyer_id',None),
+                order_items=[QueryOrderItemModel(
+                    id=item['id'],
+                    product_id=item['product_id'],
+                    product_name=item['product_name'],
+                    unit_price=item['unit_price'],
+                    discount=item['discount'],
+                    units=item['units']
+                )
+                    for item in data['order_items']],
+                address=QueryAddressModel(
+                    id=data['address']['id'],
+                    street_1=data['address']['street_1'],
+                    street_2=data['address']['street_2'],
+                    city=data['address']['city'],
+                    state=data['address']['state'],
+                    zip_code=data['address']['zip_code'],
+                    country=data['address']['country']
+                ),
+                payment_method=None,
+                buyer=None
+            ).save()
+            logger.info(f'{dt.utcnow()}: Order Id {data["id"]} added to the query database.')
+        except Exception as e:
+            logger.error(f'{dt.utcnow()}: Unable to perform replication for order_id: {data["id"]}\n{e}')
+            return e
+
+    @rpc
+    def get(self, id):
+        """
+        returns a single order based on the provided id
+        :param id:
+        :return:
+        """
+        try:
+            order = QueryOrderModel.objects.get(id=id)
+            return order.to_json()
+        except mongoengine.DoesNotExist as e:
+            return e
+        except Exception as e:
+            return e
+
+    @rpc
+    def get_by_buyer_id(self, buyer_id, num_page = 1, limit = 10):
+        """
+        returns a collection of orders based on the provided buyer_id
+        :param num_page:
+        :param limit:
+        :param buyer_id:
+        :return:
+        """
+        try:
+            offset = (num_page - 1) * limit
+            orders = QueryOrderModel.objects(buyer_id=buyer_id)\
+                .skip(offset).limit(limit)
+            return orders.to_json()
+        except mongoengine.DoesNotExist as e:
+            return e
+        except Exception as e:
+            return e

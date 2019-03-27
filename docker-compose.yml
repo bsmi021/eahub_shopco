@@ -1,11 +1,13 @@
 version: "2.1"
 services:
 
-  #  nifi:
-  #    image: apache/nifi
-  #    hostname: nifi
-  #    ports:
-  #      - "18080:8080"
+  nifi:
+    image: nifi
+    build: nifi
+    hostname: nifi
+    ports:
+      - "28080:8080"
+    restart: always
 
   redis:
     image: redis:4-alpine
@@ -32,17 +34,6 @@ services:
       test: exit 0
     restart: always
 
-  users_db:
-    build: ./users/db
-    ports:
-      - 5436:5432
-    environment:
-      POSTGRES_PASSWORD: "password"
-      POSTGRES_USER: "postgres"
-      restart: always
-    healthcheck:
-      test: exit 0
-
   rabbit:
     image: rabbit
     build: queue
@@ -51,25 +42,6 @@ services:
       - "5672:5672"
     restart: always
 
-  users_service:
-    image: users_service
-    build: ./users
-    environment:
-      - APP_RD_ADDRESS=redis:6379
-      - APP_RD_AUTH=password
-      - APP_RD_DBNAME=5
-      - APP_SETTINGS=project.config.DevelopmentConfig
-      - DATABASE_URL=postgres://postgres:password@users_db:5432/users_prod?sslmode=disable
-      - DATABASE_DEV_URL=postgres://postgres:password@users_db:5432/users_dev?sslmode=disable
-      - DATABASE_TEST_URL=postgres://postgres:password@users_db:5432/users_test?sslmode=disable
-    depends_on:
-      users_db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    links:
-      - users_db
-      - redis
 
   querydb_orders:
     build: orders/query_db/
@@ -124,6 +96,7 @@ services:
       RABBIT_USER: "guest"
       RABBIT_HOST: "rabbit"
       RABBIT_PORT: "5672"
+    restart: always
 
   payment_service:
     build:
@@ -135,6 +108,7 @@ services:
       RABBIT_USER: "guest"
       RABBIT_HOST: "rabbit"
       RABBIT_PORT: "5672"
+    restart: always
 
   customers_service:
     build:
@@ -162,6 +136,7 @@ services:
       - commanddb_customers
       - rabbit
     restart: always
+
 
   querydb_catalog:
     build: catalog/query_db/
@@ -220,6 +195,7 @@ services:
       - customers_service
       - catalog_service
       - basket_service
+    restart: always
 
   proxy:
     build:
@@ -228,7 +204,7 @@ services:
       - "8080:80"
     depends_on:
       - orchestrator
-      - users_service
+    restart: always
 
 
 volumes:

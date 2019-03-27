@@ -1,16 +1,16 @@
 import datetime
-from uuid import uuid4
+import os
+from enum import IntEnum
 
+from mongoengine import *
+from py_linq import Enumerable
 from sqlalchemy import (
-    DECIMAL, Column, DateTime, ForeignKey, Integer, String, Boolean, Float, BigInteger
+    Column, DateTime, ForeignKey, Integer, String, Boolean, Float, BigInteger
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from enum import Enum, IntEnum
-from .exceptions import OrderingException
-from py_linq import Enumerable
 
-from nameko.events import EventDispatcher
+from .exceptions import OrderingException
 
 
 class Base(object):
@@ -72,7 +72,7 @@ class Order(DeclarativeBase):
     )
     address = relationship(CommandAddressModel)
     buyer_id = Column(Integer,
-                      ForeignKey('buyers.id', name='fk_order_buyers'))
+                      ForeignKey('buyers.id', name='fk_order_buyers'), nullable=True)
     buyer = relationship('Buyer', backref='order')
 
     payment_method_id = Column(Integer,
@@ -153,6 +153,7 @@ class Order(DeclarativeBase):
         if self.order_status_id == OrderStatus.StockConfirmed.value:
             self.order_status_id = OrderStatus.Paid.value
             self.updated_at = datetime.datetime.utcnow()
+            self.description = 'The payment for this order has been performed (simulated)'
 
     def set_shipped_status(self):
         if self.order_status_id != OrderStatus.Paid.value:
@@ -160,6 +161,7 @@ class Order(DeclarativeBase):
 
         self.order_status_id = OrderStatus.Shipped.value
         self.updated_at = datetime.datetime.utcnow()
+        self.description = 'The order was shipped.'
 
     def get_total(self):
         total = sum([(item.units * item.price for item in self.order_items)])
@@ -257,3 +259,55 @@ class PaymentMethod(DeclarativeBase):
                 self.card_number == card_number and
                 self.expiration == expiration
         )
+
+
+connect(os.getenv('MONGO_DATABASE', 'orders'),
+        host=os.getenv('MONGO_HOST', '127.0.0.1'),
+        port=int(os.getenv('MONGO_PORT', 27017)))
+
+
+class QueryAddressModel(EmbeddedDocument):
+    id = IntField(primary_key=True),
+    street_1 = StringField()
+    street_2 = StringField()
+    city = StringField()
+    state = StringField()
+    zip_code = StringField()
+    country = StringField()
+
+
+class QueryOrderItemModel(EmbeddedDocument):
+    id = IntField(primary_key=True)
+    product_id = IntField()
+    product_name = StringField()
+    unit_price = FloatField()
+    discount = FloatField()
+    units = IntField()
+
+
+class QueryBuyerModel(EmbeddedDocument):
+    id = IntField(primary_key=True)
+    name = StringField()
+
+
+class QueryPaymentMethod(EmbeddedDocument):
+    id = IntField(primary_key=True)
+    alias = StringField()
+    cardholder_name = StringField()
+    expiration = StringField()
+    card_number = StringField()
+
+
+class QueryOrderModel(Document):
+    id = IntField(primary_key=True)
+    customer_id = IntField()
+    order_status_id = IntField()
+    order_date = StringField()
+    description = StringField()
+    created_at = StringField()
+    updated_at = StringField()
+    buyer_id = IntField()
+    order_items = EmbeddedDocumentListField(QueryOrderItemModel)
+    buyer = EmbeddedDocumentField(QueryBuyerModel)
+    address = EmbeddedDocumentField(QueryAddressModel)
+    payment_method = EmbeddedDocumentField(QueryPaymentMethod)

@@ -74,6 +74,9 @@ class BasketService:
     def checkout(self, basket_checkout, request_id=uuid.uuid4().__str__()):
         #  TODO: add logic to get user name from User's service
 
+        if isinstance(basket_checkout, str):
+            basket_checkout = json.loads(basket_checkout)
+
         basket_checkout['request_id'] = request_id
 
         basket = self.redis.get(basket_checkout['buyer_id'])

@@ -47,3 +47,4 @@ vine==1.2.0
 Werkzeug==0.14.1
 wrapt==1.11.1
 zipp==0.3.3
+faker

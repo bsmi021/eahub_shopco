@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 api = Namespace('customers')
 
+MIME_TYPE = 'application/json'
 RABBIT_USER = os.getenv('RABBIT_USER', 'guest')
 RABBIT_PASSWORD = os.getenv('RABBIT_PASSWORD', 'guest')
 RABBIT_HOST = os.getenv('RABBIT_HOST', '127.0.0.1')
@@ -19,24 +20,26 @@ amqp_uri = 'amqp://{}:{}@{}:{}'.format(RABBIT_USER, RABBIT_PASSWORD, RABBIT_HOST
 
 CONFIG_RPC = {'AMQP_URI': amqp_uri}
 
-
-payment_method = api.model('Payment Method',
-                           dict(
-                               id=fields.Integer(readOnly=True, attribute='_id'),
-                               alias=fields.String(required=True,
-                                                   description='A friendly name to identify the payment method'),
-                               card_type_id=fields.Integer(required=True),
-                               card_number=fields.String(),
-                               cardholder_name=fields.String(),
-                               expiration=fields.String(),
-                               security_number=fields.String(),
-                               created_at=fields.String(),
-                               updated_at=fields.String()
-                           ))
+account = api.model('Account',
+                    dict(
+                        user_name=fields.String(required=True),
+                        password_hash=fields.String(required=True),
+                        email=fields.String(required=True),
+                        name=fields.String(required=True),
+                        last_name=fields.String(required=True),
+                        street_1=fields.String(required=True),
+                        street_2=fields.String(required=False),
+                        city=fields.String(required=True),
+                        state=fields.String(required=True),
+                        zip_code=fields.String(required=True),
+                        country=fields.String(required=True),
+                        phone=fields.String(required=True)
+                    ))
 
 customer = api.model('Customer',
                      dict(
                          id=fields.Integer(readOnly=True, attribute='_id'),
+                         full_name=fields.String(required=True),
                          name=fields.String(required=True),
                          last_name=fields.String(required=True),
                          street_1=fields.String(required=True),
@@ -47,21 +50,16 @@ customer = api.model('Customer',
                          country=fields.String(required=True),
                          email=fields.String(required=True),
                          phone=fields.String(required=True),
+                         account_id=fields.Integer(required=True),
                          updated_at=fields.String(),
                          created_at=fields.String()
                      ))
-
-customer_with_payment_methods = api.inherit('Customer with Payment Methods',
-                                            customer,
-                                            dict(
-                                                payment_methods=fields.List(fields.Nested(payment_method))
-                                            ))
 
 
 @api.route('')
 class CustomersCollection(Resource):
 
-    #@api.marshal_with(customer, as_list=True, envelope='customers')
+    # @api.marshal_with(customer, as_list=True, envelope='customers')
     def get(self, num_pages=5, limit=100):
         """
         returns a list of customers
@@ -73,22 +71,39 @@ class CustomersCollection(Resource):
             response_data = rpc.query_customers.list(num_pages, limit)
             return Response(response=response_data,
                             status=200,
-                            mimetype='application/json')
+                            mimetype=MIME_TYPE)
 
     @api.expect(customer)
     @api.response(201, 'Customer Created')
     def post(self):
         data = request.json
         with ClusterRpcProxy(CONFIG_RPC) as rpc:
-            response_data = rpc.command_customers.add(data)
-            return response_data, 201
+            response_data = rpc.command_customers.add_customer(data)
+            return Response(response=response_data,
+                            status=201,
+                            mimetype=MIME_TYPE)
+
+
+@api.route('/register')
+class RegisterAction(Resource):
+
+    @api.expect(account)
+    @api.response(201, 'Account Created')
+    def post(self):
+        data = request.json
+        with ClusterRpcProxy(CONFIG_RPC) as rpc:
+            response_data = rpc.command_customers.register(data)
+            return Response(response=json.dumps(response_data),
+                            status=201,
+                            mimetype=MIME_TYPE)
+
 
 @api.route('/<int:id>')
 @api.param('id', 'Customer identifier')
 @api.response(404, 'Customer not found')
 class CustomersItem(Resource):
 
-    #@api.marshal_with(customer_with_payment_methods, envelope='customer', as_list=False)
+    # @api.marshal_with(customer_with_payment_methods, envelope='customer', as_list=False)
     def get(self, id):
         """
         Get's a single customer based on the provided ID
@@ -102,7 +117,7 @@ class CustomersItem(Resource):
 
             return Response(response=response_data,
                             status=200,
-                            mimetype='application/json')
+                            mimetype=MIME_TYPE)
 
     @api.expect(customer)
     @api.response(204, 'Customer successfully updated')
@@ -115,4 +130,6 @@ class CustomersItem(Resource):
         data = request.json
         with ClusterRpcProxy(CONFIG_RPC) as rpc:
             response_data = rpc.command_customers.update(id, data)
-            return response_data, 204
+            return Response(response=response_data,
+                            status=204,
+                            mimetype=MIME_TYPE)
