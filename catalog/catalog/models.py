@@ -1,13 +1,14 @@
 import datetime
 import os
 from mongoengine import *
-#from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects.postgresql import JSONB
 
 from sqlalchemy import (
-    DECIMAL, Column, DateTime, ForeignKey, Integer, String, Boolean
+    DECIMAL, Column, DateTime, ForeignKey, Integer, String, Boolean, BigInteger, Index
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
+import random
 
 
 class Base(object):
@@ -33,6 +34,18 @@ class ProductBrand(DeclarativeBase):
     name = Column(String, nullable=False)
 
 
+class ProductType(DeclarativeBase):
+    __tablename__ = 'product_types'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(50), nullable=False)
+    description = Column(String(255), nullable=True)
+    parent_type_id = Column(Integer,
+                            ForeignKey("product_types.id",
+                                       name='fk_product_types_hierarchy'), nullable=True)
+    parent_type = relationship('ProductType', backref='sub_types', remote_side=[id])
+
+
 class Product(DeclarativeBase):
     __tablename__ = 'products'
 
@@ -40,21 +53,20 @@ class Product(DeclarativeBase):
     name = Column(String, nullable=False)
     description = Column(String)
     price = Column(DECIMAL(10, 2))
-    product_brand_id = Column(
-        Integer,
-        ForeignKey("product_brands.id", name='fk_product_product_brand'),
-        nullable=False
-    )
+    product_brand_id = Column(Integer,
+                              ForeignKey("product_brands.id", name='fk_product_product_brand'),
+                              nullable=False
+                              )
     product_brand = relationship(ProductBrand, backref='products')
-    available_stock = Column(Integer, nullable=False, default=1)
-    restock_threshold = Column(Integer, nullable=False, default=0)
-    max_stock_threshold = Column(Integer, nullable=False, default=1000)
-    on_reorder = Column(Boolean, nullable=False, default=False)
-    weight = Column(DECIMAL, nullable=False, default=0)
-    width = Column(DECIMAL, nullable=False, default=0)
-    height = Column(DECIMAL, nullable=False, default=0)
-    depth = Column(DECIMAL, nullable=False, default=0)
+    product_type_id = Column(Integer,
+                             ForeignKey('product_types.id', name='fk_product_product_types'),
+                             nullable=False)
+    product_type = relationship(ProductType, backref='products')
+    discontinued = Column(Boolean, nullable=False, default=False)
+
     sku = Column(String, nullable=False, default=0)
+
+    attributes = Column(JSONB, nullable=True)
 
     def remove_stock(self, quantity_desired):
         """ decreements the quantity of an item from inventory"""
@@ -93,6 +105,18 @@ class Product(DeclarativeBase):
         return self.available_stock - original
 
 
+# class ProductAttribute(DeclarativeBase):
+#    __tablename__ = 'product_attributes'
+
+#    id = Column(BigInteger, primary_key=True, autoincrement=True)
+#    product_id = Column(BigInteger, ForeignKey('products.id'), nullable=False)
+#    product = relationship(Product, backref='product')
+#    attribute = Column(String(25), nullable=False)
+#    value = Column(String(255), nullable=False)
+
+#    __table_args__ = Index('index', 'product_id', 'version')
+
+
 connect(os.getenv('MONGO_DATABASE', 'products'),
         host=os.environ.get('MONGO_HOST', '127.0.0.1'),
         port=int(os.environ.get('MONGO_PORT', 27017)))
@@ -105,24 +129,25 @@ class QueryBrandModel(Document):
     updated_at = StringField()
 
 
-class ShippingDetailsModel(EmbeddedDocument):
-    weight = FloatField()
-    width = FloatField()
-    height = FloatField()
-    depth = FloatField()
-
-
 class QueryProductsModel(Document):
     id = IntField(primary_key=True)
     name = StringField()
+    sku = StringField()
     description = StringField()
     price = FloatField()
-    available_stock = IntField()
-    restock_threshold = IntField()
-    on_reorder = BooleanField()
-    max_stock_threshold = IntField()
+    discontinued = BooleanField()
     created_at = StringField()
     updated_at = StringField()
     product_brand_id = IntField()
-    sku = StringField()
-    shipping_details = EmbeddedDocumentField(ShippingDetailsModel)
+    product_brand = StringField()
+    attributes = DictField()
+    product_type_id = IntField()
+    product_type = StringField()
+
+
+class QueryProductAttribute(EmbeddedDocument):
+    id = IntField(primary_key=True)
+    attribute = StringField()
+    value = StringField()
+    created_at = StringField()
+    updated_at = StringField()

@@ -132,13 +132,39 @@ class QueryBrands:
             return e
 
 
-class CommandProducts:
+class CommandCatalog:
     name = PRODUCTS_COMMAND_SERVICE
     dispatch = EventDispatcher()
     db = DatabaseSession(DeclarativeBase)
 
     def fire_replicate_db_event(self, data):
         self.dispatch(REPLICATE_EVENT, data)
+
+
+    @rpc
+    def add_product_type(self, data):
+        if isinstance(data, str):
+            data = json.loads(data)
+
+        parent_type = None
+        if data.get('parent_type_id', None) is not None:
+            parent_type = self.db.query(ProductType).get(data['parent_type_id'])
+
+        product_type = ProductType(name=data['name'],
+                                   description=data.get('name', ''),
+                                   parent_type=parent_type)
+
+        self.db.add(product_type)
+        self.db.commit()
+
+        data['id'] = product_type.id
+        data['created_at'] = product_type.created_at
+        data['updated_at'] = product_type.updated_at
+
+        # TODO: Add replication here
+
+        return data
+
 
     @rpc
     def add_product(self, data):
@@ -154,22 +180,33 @@ class CommandProducts:
             if brand is None:
                 raise NotFound('Brand not found, cannot add product.')
 
+            type = self.db.query(ProductType)\
+                .get(data['product_type_id'])
+
+            if type is None:
+                raise NotFound('Product Type not found, cannot add product')
+
             product = Product()
 
-            product.sku = data['sku']
+            product.sku = data.get('sku')
             product.product_brand = brand
+            product.product_type = type
+
             product.name = data['name']
             product.description = data['description']
             product.price = data['price']
-            product.available_stock = data['available_stock']
-            product.restock_threshold = data['restock_threshold']
-            product.max_stock_threshold = data['max_stock_threshold']
-            product.on_reorder = data.get('on_reorder', False)
-            if data.get('shipping_details') is not None:
-                product.weight = data['shipping_details'].get('weight', 0)
-                product.width = data['shipping_details']['width']
-                product.height = data['shipping_details']['height']
-                product.depth = data['shipping_details']['depth']
+
+            product.attributes = data['attributes']
+
+            #product.available_stock = data['available_stock']
+            #product.restock_threshold = data['restock_threshold']
+            #product.max_stock_threshold = data['max_stock_threshold']
+            #product.on_reorder = data.get('on_reorder', False)
+            #if data.get('shipping_details') is not None:
+            #    product.weight = data['shipping_details'].get('weight', 0)
+            #    product.width = data['shipping_details']['width']
+            #    product.height = data['shipping_details']['height']
+            #    product.depth = data['shipping_details']['depth']
 
             self.db.add(product)
             self.db.commit()
@@ -179,6 +216,9 @@ class CommandProducts:
             data['updated_at'] = product.updated_at
 
             self.fire_replicate_db_event(data)
+
+            # TODO: Need to review this placement
+            self.dispatch('product_added', {'product_id':data['id']})
 
             return data
         except Exception as e:
@@ -202,17 +242,12 @@ class CommandProducts:
         product.name = payload['name']
         product.description = payload['description']
         product.price = payload['price']
-        product.available_stock = payload['available_stock']
-        product.restock_threshold = payload['restock_threshold']
-        product.max_stock_threshold = payload['max_stock_threshold']
+
         product.updated_at = datetime.datetime.utcnow()
 
-        if payload.get('shipping_details') is not None:
-            product.weight = payload['shipping_details'].get('weight', product.weight)
-            product.width = payload['shipping_details'].get('width', product.width)
-            product.height = payload['shipping_details'].get('height', product.height)
-            product.depth = payload['shipping_details'].get('depth', product.depth)
+        product.attributes = payload.get('attributes')
 
+        self.db.add(product)
         self.db.commit()
 
         payload['updated_at'] = product.updated_at
@@ -226,10 +261,20 @@ class CommandProducts:
     @rpc
     def delete_product(self, id):
         product = self.db.query(Product).get(id)
-        self.db.delete(product)
+
+        product.discontinued = True
+        product.updated_at = datetime.datetime.utcnow()
+
+        self.db.add(product)
         self.db.commit()
 
-    @event_handler(ORDERS_SERVICE, 'order_status_changed_to_paid')
+        data = {'id':id,
+                'discontinued':product.discontinued,
+                'updated_at':product.updated_at}
+
+        self.fire_replicate_db_event(data)
+
+    #@event_handler(ORDERS_SERVICE, 'order_status_changed_to_paid')
     def handle_order_status_changed_paid(self, payload):
         """
         This will remove items from stock for items from an order.
@@ -260,7 +305,7 @@ class CommandProducts:
                 {p["units"]} units removed for product_id: {product.id}: there are {product.available_stock} \
                 units remaining')
 
-    @event_handler(ORDERS_SERVICE, 'order_status_changed_to_awaiting_validation')
+    #@event_handler(ORDERS_SERVICE, 'order_status_changed_to_awaiting_validation')
     def verify_stock_for_order(self, payload):
         """
         With the provided order payload, inspect each requested product to
@@ -294,10 +339,13 @@ class CommandProducts:
         random amount to get them over the min_stock_threshold
         :return:
         """
-
+        return 1
         products = self.db.query(Product) \
             .filter(Product.restock_threshold >
                     Product.available_stock).all()
+
+        if products is None or len(products) == 0:
+            return
 
         for product in products:
             x = product.max_stock_threshold - product.restock_threshold
@@ -324,28 +372,17 @@ class QueryProducts:
     def normalize_db(self, data):
         try:
             product = QueryProductsModel.objects.get(id=data['id'])
-            if data.get('shipping_details') is not None:
-                shipping_details = ShippingDetailsModel(
-                    weight=data.get('shipping_details').get('weight', product.shipping_details.weight),
-                    width=data.get('shipping_details').get('width', product.shipping_details.width),
-                    height=data.get('shipping_details').get('height', product.shipping_details.height),
-                    depth=data.get('shipping_details').get('depth', product.shipping_details.depth)
-                )
-            else:
-                shipping_details = product.shipping_details
 
             product.update(
                 name=data.get('name', product.name),
                 description=data.get('description', product.description),
                 price=data.get('price', product.price),
-                available_stock=data.get('available_stock', product.available_stock),
-                max_stock_threshold=data.get('max_stock_threshold', product.max_stock_threshold),
-                on_reorder=data.get('on_reorder', product.on_reorder),
-                restock_threshold=data.get('restock_threshold', product.restock_threshold),
                 product_brand_id=data.get('product_brand_id', product.product_brand_id),
+                product_type_id=data.get('product_type_id', product.product_type_id),
                 updated_at=data.get('updated_at', product.updated_at),
                 sku=str(data.get('sku', product.sku)),
-                shipping_details=shipping_details
+                discontinued=data.get('discontinued', product.discontinued),
+                attributes=data.get('attributes', product.attributes)
             )
             product.reload()
             logger.info('Product Updated')
@@ -357,20 +394,13 @@ class QueryProducts:
                 name=data['name'],
                 description=data['description'],
                 price=data['price'],
-                available_stock=data['available_stock'],
-                max_stock_threshold=data['max_stock_threshold'],
-                on_reorder=data.get('on_reorder', False),
-                restock_threshold=data['restock_threshold'],
                 product_brand_id=data['product_brand_id'],
+                product_type_id=data['product_type_id'],
                 created_at=data['created_at'],
                 updated_at=data['updated_at'],
                 sku=str(data['sku']),
-                shipping_details=ShippingDetailsModel(
-                    weight=data.get('shipping_details').get('weight', 0),
-                    width=data.get('shipping_details').get('width', 0),
-                    height=data.get('shipping_details').get('height', 0),
-                    depth=data.get('shipping_details').get('depth', 0)
-                )
+                attributes=data.get('attributes'),
+                discontinued=data.get('discontinued')
             ).save()
             logger.info('Product Added')
         except Exception as e:

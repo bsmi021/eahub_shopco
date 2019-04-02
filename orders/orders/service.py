@@ -8,6 +8,7 @@ from datetime import datetime as dt
 from nameko.events import event_handler, EventDispatcher
 from nameko_sqlalchemy import DatabaseSession
 from nameko.rpc import rpc
+from nameko.web.handlers import http
 
 from .exceptions import NotFound
 from .models import *
@@ -24,6 +25,7 @@ BUYER_QUERY_SERVICE = 'query_buyers'
 PAYMENTS_SERVICE = 'command_payments'
 PRODUCTS_SERVICE = 'command_products'
 BASKET_SERVICE = 'basket_service'
+WAREHOUSE_COMMAND_SERVICE = 'command_item'
 
 
 class CommandOrders:
@@ -270,7 +272,7 @@ class CommandOrders:
 
         logger.info(f'{dt.utcnow()}: order_id: {order.id} submitted for buyer_id: {payload["user_id"]}.')
 
-    @event_handler(PRODUCTS_SERVICE, 'confirmed_order_stock')
+    @event_handler(WAREHOUSE_COMMAND_SERVICE, 'confirmed_order_stock')
     def order_stock_confirmed(self, payload):
         """
         integration event handler
@@ -300,7 +302,7 @@ class CommandOrders:
 
         logger.info(f'{dt.utcnow()}: order_id: {order.id} status set to STOCK_CONFIRMED')
 
-    @event_handler(PRODUCTS_SERVICE, 'rejected_order_stock')
+    @event_handler(WAREHOUSE_COMMAND_SERVICE, 'rejected_order_stock')
     def handle_rejected_order_stock(self, payload):
         """
         integration event handler
@@ -446,6 +448,7 @@ class QueryOrders:
             return e
 
     @rpc
+    @http('GET', '/orders/<int:id>')
     def get(self, id):
         """
         returns a single order based on the provided id

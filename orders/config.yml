@@ -1,4 +1,16 @@
 AMQP_URI: amqp://${RABBIT_USER}:${RABBIT_PASSWORD}@${RABBIT_HOST}:${RABBIT_PORT}/
+WEB_SERVER_ADDRESS: '0.0.0.0:5000'
+max_workers: 10
+parent_calls_tracked: 10
 
 DB_URIS:
   "command_orders:Base": postgresql://${DB_USER:postgres}:${DB_PASSWORD:password}@${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:orders}
+
+LOGGING:
+  version: 1
+  handlers:
+    console:
+      class: logging.StreamHandler
+  root:
+    level: DEBUG
+    handlers: [console]

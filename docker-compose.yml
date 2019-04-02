@@ -137,6 +137,19 @@ services:
       - rabbit
     restart: always
 
+  querydb_warehouse:
+    build: warehouse/query_db/
+    ports:
+      - "27021:27017"
+    restart: always
+
+  commanddb_warehouse:
+    build: warehouse/command_db/
+    ports:
+      - "5441:5432"
+    healthcheck:
+      test: exit 0
+    restart: always
 
   querydb_catalog:
     build: catalog/query_db/
@@ -176,6 +189,33 @@ services:
     links:
       - querydb_catalog
       - commanddb_catalog
+      - rabbit
+    restart: always
+
+  warehouse_service:
+    build:
+      context:
+        warehouse
+    environment:
+      - RABBIT_PASSWORD=guest
+      - RABBIT_USER=guest
+      - RABBIT_HOST=rabbit
+      - RABBIT_PORT=5672
+      - DB_PASSWORD=password
+      - DB_USER=postgres
+      - DB_HOST=commanddb_warehouse
+      - DB_NAME=warehouse
+      - PYTHONPATH=.
+      - MONGO_HOST=querydb_warehouse
+      - MONGO_PORT=27017
+      - MONGO_DATABASE=warehouse
+    depends_on:
+      - querydb_warehouse
+      - commanddb_warehouse
+      - rabbit
+    links:
+      - querydb_warehouse
+      - commanddb_warehouse
       - rabbit
     restart: always
 
