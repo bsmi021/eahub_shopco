@@ -31,7 +31,7 @@ class OrderItem(Resource):
     def get(self, id):
         try:
             with ClusterRpcProxy(CONFIG_RPC) as rpc:
-                response_data = rpc.query_orders.get(id)
+                response_data = rpc.query_orders.get(None, id)
                 return Response(response=response_data,
                                 status=200,
                                 mimetype='application/json')

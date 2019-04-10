@@ -1,12 +1,25 @@
 version: "2.1"
 services:
 
+  kafka:
+    image: kafka
+    build: kafka
+    hostname: kafka
+    ports:
+      - "9092:9092"
+      - "3030:3030"
+    restart: always
+    healthcheck:
+      test: exit 0
+
   nifi:
     image: nifi
     build: nifi
     hostname: nifi
     ports:
       - "28080:8080"
+    depends_on:
+      - kafka
     restart: always
 
   redis:
@@ -20,16 +33,16 @@ services:
     healthcheck:
       test: exit 0
 
-  querydb_customers:
+  querydb:
     build: customers/query_db/
     ports:
-      - "27019:27017"
+      - "27017:27017"
     restart: always
 
-  commanddb_customers:
-    build: customers/command_db/
+  commanddb:
+    build: command_db/
     ports:
-      - "5439:5432"
+      - "5432:5432"
     healthcheck:
       test: exit 0
     restart: always
@@ -40,21 +53,6 @@ services:
     ports:
       - "15672:15672"
       - "5672:5672"
-    restart: always
-
-
-  querydb_orders:
-    build: orders/query_db/
-    ports:
-      - "27020:27017"
-    restart: always
-
-  commanddb_orders:
-    build: orders/command_db/
-    ports:
-      - "5440:5432"
-    healthcheck:
-      test: exit 0
     restart: always
 
   orders_service:
@@ -68,19 +66,19 @@ services:
       - RABBIT_PORT=5672
       - DB_PASSWORD=password
       - DB_USER=postgres
-      - DB_HOST=commanddb_orders
+      - DB_HOST=commanddb
       - DB_NAME=orders
       - PYTHONPATH=.
-      - MONGO_HOST=querydb_orders
+      - MONGO_HOST=querydb
       - MONGO_PORT=27017
       - MONGO_DATABASE=orders
     depends_on:
-      - querydb_orders
-      - commanddb_orders
+      - querydb
+      - commanddb
       - rabbit
     links:
-      - querydb_orders
-      - commanddb_orders
+      - querydb
+      - commanddb
       - rabbit
     restart: always
 
@@ -121,48 +119,20 @@ services:
       - RABBIT_PORT=5672
       - DB_PASSWORD=password
       - DB_USER=postgres
-      - DB_HOST=commanddb_customers
+      - DB_HOST=commanddb
       - DB_NAME=customers
       - PYTHONPATH=.
-      - MONGO_HOST=querydb_customers
+      - MONGO_HOST=querydb
       - MONGO_PORT=27017
       - MONGO_DATABASE=customers
     depends_on:
-      - querydb_customers
-      - commanddb_customers
+      - querydb
+      - commanddb
       - rabbit
     links:
-      - querydb_customers
-      - commanddb_customers
+      - querydb
+      - commanddb
       - rabbit
-    restart: always
-
-  querydb_warehouse:
-    build: warehouse/query_db/
-    ports:
-      - "27021:27017"
-    restart: always
-
-  commanddb_warehouse:
-    build: warehouse/command_db/
-    ports:
-      - "5441:5432"
-    healthcheck:
-      test: exit 0
-    restart: always
-
-  querydb_catalog:
-    build: catalog/query_db/
-    ports:
-      - "27018:27017"
-    restart: always
-
-  commanddb_catalog:
-    build: catalog/command_db/
-    ports:
-      - "5435:5432"
-    healthcheck:
-      test: exit 0
     restart: always
 
   catalog_service:
@@ -176,19 +146,19 @@ services:
       - RABBIT_PORT=5672
       - DB_PASSWORD=password
       - DB_USER=postgres
-      - DB_HOST=commanddb_catalog
+      - DB_HOST=commanddb
       - DB_NAME=catalog
       - PYTHONPATH=.
-      - MONGO_HOST=querydb_catalog
+      - MONGO_HOST=querydb
       - MONGO_PORT=27017
       - MONGO_DATABASE=catalog
     depends_on:
-      - querydb_catalog
-      - commanddb_catalog
+      - querydb
+      - commanddb
       - rabbit
     links:
-      - querydb_catalog
-      - commanddb_catalog
+      - querydb
+      - commanddb
       - rabbit
     restart: always
 
@@ -203,19 +173,19 @@ services:
       - RABBIT_PORT=5672
       - DB_PASSWORD=password
       - DB_USER=postgres
-      - DB_HOST=commanddb_warehouse
+      - DB_HOST=commanddb
       - DB_NAME=warehouse
       - PYTHONPATH=.
-      - MONGO_HOST=querydb_warehouse
+      - MONGO_HOST=querydb
       - MONGO_PORT=27017
       - MONGO_DATABASE=warehouse
     depends_on:
-      - querydb_warehouse
-      - commanddb_warehouse
+      - querydb
+      - commanddb
       - rabbit
     links:
-      - querydb_warehouse
-      - commanddb_warehouse
+      - querydb
+      - commanddb
       - rabbit
     restart: always
 

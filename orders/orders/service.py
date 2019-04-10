@@ -438,9 +438,7 @@ class QueryOrders:
                     state=data['address']['state'],
                     zip_code=data['address']['zip_code'],
                     country=data['address']['country']
-                ),
-                payment_method=None,
-                buyer=None
+                )
             ).save()
             logger.info(f'{dt.utcnow()}: Order Id {data["id"]} added to the query database.')
         except Exception as e:
@@ -449,7 +447,7 @@ class QueryOrders:
 
     @rpc
     @http('GET', '/orders/<int:id>')
-    def get(self, id):
+    def get(self, request, id):
         """
         returns a single order based on the provided id
         :param id:

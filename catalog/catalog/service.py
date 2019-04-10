@@ -141,29 +141,7 @@ class CommandCatalog:
         self.dispatch(REPLICATE_EVENT, data)
 
 
-    @rpc
-    def add_product_type(self, data):
-        if isinstance(data, str):
-            data = json.loads(data)
 
-        parent_type = None
-        if data.get('parent_type_id', None) is not None:
-            parent_type = self.db.query(ProductType).get(data['parent_type_id'])
-
-        product_type = ProductType(name=data['name'],
-                                   description=data.get('name', ''),
-                                   parent_type=parent_type)
-
-        self.db.add(product_type)
-        self.db.commit()
-
-        data['id'] = product_type.id
-        data['created_at'] = product_type.created_at
-        data['updated_at'] = product_type.updated_at
-
-        # TODO: Add replication here
-
-        return data
 
 
     @rpc
@@ -180,9 +158,6 @@ class CommandCatalog:
             if brand is None:
                 raise NotFound('Brand not found, cannot add product.')
 
-            type = self.db.query(ProductType)\
-                .get(data['product_type_id'])
-
             if type is None:
                 raise NotFound('Product Type not found, cannot add product')
 
@@ -190,23 +165,12 @@ class CommandCatalog:
 
             product.sku = data.get('sku')
             product.product_brand = brand
-            product.product_type = type
 
             product.name = data['name']
             product.description = data['description']
             product.price = data['price']
 
             product.attributes = data['attributes']
-
-            #product.available_stock = data['available_stock']
-            #product.restock_threshold = data['restock_threshold']
-            #product.max_stock_threshold = data['max_stock_threshold']
-            #product.on_reorder = data.get('on_reorder', False)
-            #if data.get('shipping_details') is not None:
-            #    product.weight = data['shipping_details'].get('weight', 0)
-            #    product.width = data['shipping_details']['width']
-            #    product.height = data['shipping_details']['height']
-            #    product.depth = data['shipping_details']['depth']
 
             self.db.add(product)
             self.db.commit()
@@ -368,6 +332,7 @@ class CommandCatalog:
 class QueryProducts:
     name = PRODUCTS_QUERY_SERVICE
 
+
     @event_handler(PRODUCTS_COMMAND_SERVICE, REPLICATE_EVENT)
     def normalize_db(self, data):
         try:
@@ -378,7 +343,6 @@ class QueryProducts:
                 description=data.get('description', product.description),
                 price=data.get('price', product.price),
                 product_brand_id=data.get('product_brand_id', product.product_brand_id),
-                product_type_id=data.get('product_type_id', product.product_type_id),
                 updated_at=data.get('updated_at', product.updated_at),
                 sku=str(data.get('sku', product.sku)),
                 discontinued=data.get('discontinued', product.discontinued),
@@ -395,7 +359,6 @@ class QueryProducts:
                 description=data['description'],
                 price=data['price'],
                 product_brand_id=data['product_brand_id'],
-                product_type_id=data['product_type_id'],
                 created_at=data['created_at'],
                 updated_at=data['updated_at'],
                 sku=str(data['sku']),

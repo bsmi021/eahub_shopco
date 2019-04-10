@@ -1,0 +1,1 @@
+FROM landoop/fast-data-dev:latest

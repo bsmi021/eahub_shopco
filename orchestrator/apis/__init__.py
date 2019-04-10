@@ -8,6 +8,7 @@ from .products_ns import api as product_ns
 from .customers_ns import api as customer_ns
 from .basket_ns import api as basket_ns
 from .orders_ns import api as orders_ns
+from .warehouse_ns import api as warehouse_ns
 
 logger = logging.getLogger(__name__)
 
@@ -29,3 +30,4 @@ api.add_namespace(customer_ns)
 api.add_namespace(product_ns)
 api.add_namespace(basket_ns)
 api.add_namespace(orders_ns)
+api.add_namespace(warehouse_ns)

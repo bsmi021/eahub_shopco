@@ -34,18 +34,6 @@ class ProductBrand(DeclarativeBase):
     name = Column(String, nullable=False)
 
 
-class ProductType(DeclarativeBase):
-    __tablename__ = 'product_types'
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(50), nullable=False)
-    description = Column(String(255), nullable=True)
-    parent_type_id = Column(Integer,
-                            ForeignKey("product_types.id",
-                                       name='fk_product_types_hierarchy'), nullable=True)
-    parent_type = relationship('ProductType', backref='sub_types', remote_side=[id])
-
-
 class Product(DeclarativeBase):
     __tablename__ = 'products'
 
@@ -58,10 +46,6 @@ class Product(DeclarativeBase):
                               nullable=False
                               )
     product_brand = relationship(ProductBrand, backref='products')
-    product_type_id = Column(Integer,
-                             ForeignKey('product_types.id', name='fk_product_product_types'),
-                             nullable=False)
-    product_type = relationship(ProductType, backref='products')
     discontinued = Column(Boolean, nullable=False, default=False)
 
     sku = Column(String, nullable=False, default=0)
@@ -105,18 +89,6 @@ class Product(DeclarativeBase):
         return self.available_stock - original
 
 
-# class ProductAttribute(DeclarativeBase):
-#    __tablename__ = 'product_attributes'
-
-#    id = Column(BigInteger, primary_key=True, autoincrement=True)
-#    product_id = Column(BigInteger, ForeignKey('products.id'), nullable=False)
-#    product = relationship(Product, backref='product')
-#    attribute = Column(String(25), nullable=False)
-#    value = Column(String(255), nullable=False)
-
-#    __table_args__ = Index('index', 'product_id', 'version')
-
-
 connect(os.getenv('MONGO_DATABASE', 'products'),
         host=os.environ.get('MONGO_HOST', '127.0.0.1'),
         port=int(os.environ.get('MONGO_PORT', 27017)))
@@ -141,13 +113,5 @@ class QueryProductsModel(Document):
     product_brand_id = IntField()
     product_brand = StringField()
     attributes = DictField()
-    product_type_id = IntField()
-    product_type = StringField()
 
 
-class QueryProductAttribute(EmbeddedDocument):
-    id = IntField(primary_key=True)
-    attribute = StringField()
-    value = StringField()
-    created_at = StringField()
-    updated_at = StringField()

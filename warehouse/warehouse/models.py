@@ -26,13 +26,17 @@ class Base(object):
 
 DeclarativeBase = declarative_base(cls=Base)
 
+SiteTypes = { 1: 'Distribution Center',
+              2: 'Store',
+              3: 'Forward Shipping'}
+
 
 class Site(DeclarativeBase):
     __tablename__ = 'sites'
     id = Column(BigInteger, autoincrement=True, primary_key=True)
     name = Column(String(50), nullable=False)
     zip_code = Column(String(12), nullable=False)
-    type = Column(Integer, nullable=False)  # 1 Warehouse 2 Store
+    type_id = Column(Integer, nullable=False)  # 1 DC 2 Store
 
 
 class InventoryItem(DeclarativeBase):
@@ -108,8 +112,10 @@ class SiteQueryModel(Document):
     id = IntField(primary_key=True)
     name = StringField()
     zip_code = StringField()
-    type_id = StringField()
+    type_id = IntField()
     type = StringField()
+    created_at = StringField()
+    updated_at = StringField()
 
 
 class InventoryItemQueryModel(Document):
@@ -121,5 +127,6 @@ class InventoryItemQueryModel(Document):
     restock_threshold = IntField()
     max_stock_threshold = IntField()
     available_stock = IntField()
+    created_at = StringField()
     updated_at = StringField()
     committed_stock = IntField()

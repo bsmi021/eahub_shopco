@@ -12,5 +12,5 @@ LOGGING:
     console:
       class: logging.StreamHandler
   root:
-    level: DEBUG
+    level: ERROR
     handlers: [console]
