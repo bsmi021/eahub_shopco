@@ -47,7 +47,7 @@ brand_count = 13
 product_count = 300
 customer_count = 600
 site_count = 12
-order_count = 500
+order_count = 5000
 
 print('Checking on customers, creating if necessary')
 

@@ -226,7 +226,6 @@ class CommandInventoryItem:
         :return:
         """
 
-        logger.info('Got here')
         if isinstance(data, str):
             data = json.loads(data)
 

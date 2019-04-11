@@ -198,7 +198,7 @@ class CommandOrders:
 
         logger.info(f'{dt.utcnow()}: order_id: {order.id} status set to Awaiting Validation')
 
-    @event_handler(ORDER_COMMAND_SERVICE, 'order_status_submitted')
+    @event_handler(ORDER_COMMAND_SERVICE, 'order_status_changed_to_submitted')
     def order_submitted(self, payload):
         """
         domain event handler
@@ -268,6 +268,7 @@ class CommandOrders:
             'order': {"id": order.id, "order_status_id": order.order_status_id}
         }
 
+        self.dispatch('order_status_changed_to_submitted', {'order_id': order.id})
         self.dispatch('order_started', validate_buyer_payload)
 
         logger.info(f'{dt.utcnow()}: order_id: {order.id} submitted for buyer_id: {payload["user_id"]}.')
@@ -297,7 +298,7 @@ class CommandOrders:
 
         self._save_order(order)
 
-        time.sleep(5)
+        #time.sleep(5)
         self.dispatch('order_status_changed_to_stock_confirmed', {'order_id': order_id})
 
         logger.info(f'{dt.utcnow()}: order_id: {order.id} status set to STOCK_CONFIRMED')
@@ -326,6 +327,8 @@ class CommandOrders:
         order.set_cancelled_status_when_stock_is_rejected(rejected_stock)
 
         self._save_order(order)
+
+        self.dispatch('order_status_changed_to_cancelled', payload)
 
     @event_handler(PAYMENTS_SERVICE, 'order_payment_succeeded')
     def order_payment_succeeded(self, payload):
@@ -359,7 +362,7 @@ class CommandOrders:
                                   for item in order.order_items]
         }
 
-        time.sleep(15)
+        #time.sleep(15)
         self.dispatch('order_status_changed_to_paid', payload)
 
         logger.info(f'{dt.utcnow()}: order_id: {order.id} status set to PAID.')
@@ -407,9 +410,9 @@ class QueryOrders:
                 buyer=buyer,
                 payment_method=payment_method
             )
-
-
             order.reload()
+
+
             logger.info(f'{dt.utcnow()}: Order Id {data["id"]} has been updated in the query database.')
         except mongoengine.DoesNotExist:
             """ Create the order in the query database since it doesn't exist already"""
