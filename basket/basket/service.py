@@ -88,7 +88,7 @@ class BasketService:
 
         event_message = dict(
             user_id = basket_checkout['buyer_id'],
-            user_name=user_name,
+            user_name=basket_checkout['buyer'],
             city=basket_checkout['city'],
             state=basket_checkout['state'],
             street_1=basket_checkout['street_1'],
