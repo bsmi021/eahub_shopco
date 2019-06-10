@@ -22,18 +22,23 @@ zip_search = SearchEngine(simple_zipcode=True)
 
 def get_random_city_zip():
     state_abbr = fake.state_abbr(include_territories=False)
-    zip_code = fake.zipcode_in_state(state_abbr=state_abbr)
+    #print (state_abbr)
+    state_abbr = 'NY'
+    #zip_code = fake.zipcode_in_state(state_abbr=state_abbr)
+    #f_zip_code = zip_search.by_zipcode(zip_code)
+
+    zip_code = random.randint(10000,99999)
     f_zip_code = zip_search.by_zipcode(zip_code)
 
     while f_zip_code.zipcode is None:
-        state_abbr = fake.state_abbr(include_territories=False)
-        zip_code = fake.zipcode_in_state(state_abbr=state_abbr)
+        zip_code = random.randint(10000,99999)
         f_zip_code = zip_search.by_zipcode(zip_code)
 
+    print (f_zip_code)
     return f_zip_code
 
 
-uri = "http://localhost:5000/api"
+uri = "http://brwsmi-espserver.unx.sas.com:5000/api"
 
 brand_uri = "{}/brands".format(uri)
 products_uri = "{}/products".format(uri)
@@ -45,7 +50,7 @@ sites_uri = f'{uri}/warehouse/sites'
 
 brand_count = 13
 product_count = 300
-customer_count = 600
+customer_count = 45000
 site_count = 12
 order_count = 5000
 
