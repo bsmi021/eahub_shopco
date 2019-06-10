@@ -38,7 +38,7 @@ def get_random_city_zip():
     return f_zip_code
 
 
-uri = "http://brwsmi-espserver.unx.sas.com:5000/api"
+uri = "http://10.104.87.133:5000/api"
 
 brand_uri = "{}/brands".format(uri)
 products_uri = "{}/products".format(uri)
@@ -49,10 +49,10 @@ register_uri = f"{customers_uri}/register"
 sites_uri = f'{uri}/warehouse/sites'
 
 brand_count = 13
-product_count = 300
+product_count = 555
 customer_count = 45000
 site_count = 12
-order_count = 5000
+order_count = 50000
 
 print('Checking on customers, creating if necessary')
 
