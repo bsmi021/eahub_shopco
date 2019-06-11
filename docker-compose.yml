@@ -47,6 +47,14 @@ services:
       test: exit 0
     restart: always
 
+  cassandra:
+    build: cassandra/
+    ports:
+      - "19042:9042"
+    healthcheck:
+      test: exit 0
+    restart: always
+
   rabbit:
     image: rabbit
     build: queue
