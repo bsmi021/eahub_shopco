@@ -59,6 +59,6 @@ text-unidecode==1.2
 urllib3==1.24.1
 uszipcode==0.2.2
 vine==1.2.0
-Werkzeug==0.14.1
+Werkzeug==0.15.3
 wrapt==1.11.1
 zipp==0.3.3
