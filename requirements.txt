@@ -19,7 +19,7 @@ greenlet==0.4.15
 idna==2.8
 importlib-metadata==0.8
 itsdangerous==1.1.0
-Jinja2==2.10
+Jinja2==2.11.3
 jsonpickle==1.1
 jsonschema==3.0.1
 kazoo==2.5.0
