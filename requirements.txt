@@ -48,7 +48,7 @@ pyrsistent==0.14.11
 python-dateutil==2.8.0
 python-editor==1.0.4
 pytz==2018.9
-PyYAML==5.1
+PyYAML==5.4
 redis==3.2.0
 relativetimebuilder==0.2.0
 requests==2.21.0
