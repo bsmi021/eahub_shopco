@@ -9,7 +9,7 @@ chardet==3.0.4
 Click==7.0
 confluent-kafka==1.0.0
 dnspython==1.16.0
-eventlet==0.24.1
+eventlet==0.31.0
 Faker==1.0.4
 Flask==1.0.2
 flask-restplus==0.12.1
