@@ -30,7 +30,7 @@ marshmallow==2.18.1
 mock==2.0.0
 mongoengine==0.16.3
 monotonic==1.5
-nameko==2.11.0
+nameko==2.14.0
 nameko-mongodb==1.1.1
 nameko-redis==1.1.0
 nameko-sqlalchemy==1.5.0
